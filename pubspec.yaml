@@ -1,14 +1,16 @@
 name: bingo
-description: "A new Flutter project."
+description: A Bingo game built with Flutter
 version: 0.1.0
 
 environment:
   sdk: ^3.6.1
 
 dependencies:
+  confetti: ^0.8.0
   flutter:
     sdk: flutter
   provider: ^6.1.2
+  shared_preferences: ^2.5.2
 
 dev_dependencies:
   flutter_lints: ^5.0.0
@@ -17,3 +19,9 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  fonts:
+    - family: Poppins
+      fonts:
+        - asset: assets/fonts/Poppins-Regular.ttf
+        - asset: assets/fonts/Poppins-Bold.ttf
+          weight: 700

@@ -1,6 +1,7 @@
 class GameState {
   List<List<int>> board; // 5x5 bingo board
   List<bool> marked; // Tracks marked numbers (1-25)
+  Map<int, bool> isAiSelection; // Tracks if a number was selected by AI
   String bingoStatus; // Tracks "B", "I", "N", "G", "O"
   String roomId; // For multiplayer
   List<int> selectedNumbers; // Tracks all numbers selected in the game
@@ -8,6 +9,7 @@ class GameState {
   GameState({
     required this.board,
     this.marked = const [],
+    this.isAiSelection = const {},
     this.bingoStatus = "",
     this.roomId = "",
     this.selectedNumbers = const [],
@@ -26,15 +28,17 @@ class GameState {
     return GameState(
       board: generateBoard(),
       marked: List.filled(25, false),
+      isAiSelection: {},
       selectedNumbers: [],
     );
   }
 
-  bool markNumber(int number) {
+  bool markNumber(int number, {bool isAi = false}) {
     if (selectedNumbers.contains(number)) return false; // Number already selected
     int index = number - 1;
     if (index >= 0 && index < 25) {
       marked[index] = true;
+      isAiSelection[number] = isAi;
       selectedNumbers.add(number);
       updateBingoStatus();
       return true;

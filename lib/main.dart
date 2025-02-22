@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-
 import '../screens/home_screen.dart';
 
 void main() {
@@ -12,10 +11,11 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Bingo',
       debugShowCheckedModeBanner: false,
+      title: 'Bingo',
       theme: ThemeData(
         primarySwatch: Colors.blue,
+        fontFamily: 'Poppins',
         visualDensity: VisualDensity.adaptivePlatformDensity,
       ),
       home: HomeScreen(),

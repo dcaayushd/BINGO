@@ -6,7 +6,8 @@ class BingoCell extends StatelessWidget {
   final bool isAiSelection;
   final VoidCallback onTap;
 
-  const BingoCell({super.key, 
+  const BingoCell({
+    super.key,
     required this.number,
     required this.marked,
     required this.isAiSelection,
@@ -19,11 +20,14 @@ class BingoCell extends StatelessWidget {
       onTap: onTap,
       child: Container(
         decoration: BoxDecoration(
-          border: Border.all(color: Colors.grey.shade300, width: 1),
+          border:
+              Border.all(color: Color.fromRGBO(255, 255, 255, 0.2), width: 1),
           color: marked
-              ? (isAiSelection ? Colors.orange.shade100 : Colors.green.shade100)
+              ? (isAiSelection
+                  ? Color.fromRGBO(255, 152, 0, 0.9) // Bolder orange
+                  : Color.fromRGBO(76, 175, 80, 0.9)) // Bolder green
               : Colors.white,
-          borderRadius: BorderRadius.circular(8),
+          borderRadius: BorderRadius.circular(12),
           boxShadow: [
             BoxShadow(
               color: Colors.black12,
@@ -36,8 +40,8 @@ class BingoCell extends StatelessWidget {
           child: Text(
             number.toString(),
             style: TextStyle(
-              color: Colors.black87,
-              fontSize: 20,
+              color: marked ? Colors.white : Colors.black87,
+              fontSize: 24,
               fontWeight: FontWeight.bold,
               fontFamily: 'Poppins',
             ),

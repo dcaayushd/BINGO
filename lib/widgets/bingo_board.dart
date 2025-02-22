@@ -6,34 +6,73 @@ import '../widgets/bingo_cell.dart';
 class BingoBoard extends StatelessWidget {
   final GameState gameState;
   final Function(int) onNumberSelected;
+  final VoidCallback onRestart;
 
-  const BingoBoard(
-      {super.key, required this.gameState, required this.onNumberSelected});
+  const BingoBoard({
+    super.key,
+    required this.gameState,
+    required this.onNumberSelected,
+    required this.onRestart,
+  });
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          colors: [Colors.purple.shade100, Colors.purple.shade300],
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-        ),
-      ),
-      child: Column(
-        children: [
-          Text(
-            gameState.bingoStatus.isEmpty ? "Bingo" : gameState.bingoStatus,
-            style: TextStyle(
-              fontSize: 32,
-              fontWeight: FontWeight.bold,
-              fontFamily: 'Poppins',
-              color: Colors.purple.shade900,
+    return Column(
+      children: [
+        Container(
+          padding: EdgeInsets.symmetric(vertical: 12, horizontal: 24),
+          decoration: BoxDecoration(
+            // color: Colors.white.withOpacity(0.15),
+            gradient: LinearGradient(
+              colors: [
+                Color.fromRGBO(156, 39, 176, 0.7),
+                Color.fromRGBO(123, 31, 162, 0.9),
+              ],
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+            ),
+            borderRadius: BorderRadius.only(
+              topLeft: Radius.circular(20),
+              topRight: Radius.circular(20),
             ),
           ),
-          SizedBox(height: 20),
-          GridView.builder(
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                gameState.bingoStatus.isEmpty ? "Bingo" : gameState.bingoStatus,
+                style: TextStyle(
+                  fontSize: 32,
+                  fontWeight: FontWeight.bold,
+                  fontFamily: 'Poppins',
+                  color: Colors.white,
+                ),
+              ),
+              IconButton(
+                onPressed: onRestart,
+                icon: Icon(Icons.replay, color: Colors.white, size: 28),
+              ),
+            ],
+          ),
+        ),
+        Container(
+          decoration: BoxDecoration(
+            // color: Colors.white.withOpacity(0.15),
+            gradient: LinearGradient(
+              colors: [
+                Color.fromRGBO(156, 39, 176, 0.7),
+                Color.fromRGBO(123, 31, 162, 0.9),
+              ],
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+            ),
+            borderRadius: BorderRadius.only(
+              bottomLeft: Radius.circular(20),
+              bottomRight: Radius.circular(20),
+            ),
+          ),
+          padding: EdgeInsets.all(16),
+          child: GridView.builder(
             shrinkWrap: true,
             physics: NeverScrollableScrollPhysics(),
             gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
@@ -54,8 +93,8 @@ class BingoBoard extends StatelessWidget {
               );
             },
           ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 }

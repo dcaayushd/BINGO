@@ -1,10 +1,10 @@
 class GameState {
-  List<List<int>> board; // 5x5 bingo board
-  List<bool> marked; // Tracks marked numbers (1-25)
-  Map<int, bool> isAiSelection; // Tracks if a number was selected by AI
-  String bingoStatus; // Tracks "B", "I", "N", "G", "O"
-  String roomId; // For multiplayer
-  List<int> selectedNumbers; // Tracks all numbers selected in the game
+  List<List<int>> board;
+  List<bool> marked;
+  Map<int, bool> isAiSelection;
+  String bingoStatus;
+  String roomId;
+  List<int> selectedNumbers;
 
   GameState({
     required this.board,
@@ -30,6 +30,31 @@ class GameState {
       marked: List.filled(25, false),
       isAiSelection: {},
       selectedNumbers: [],
+    );
+  }
+
+  // Add these methods for Firebase
+  Map<String, dynamic> toJson() {
+    return {
+      'board': board.map((row) => row.map((e) => e).toList()).toList(),
+      'marked': marked.map((e) => e).toList(),
+      'isAiSelection': isAiSelection.map((key, value) => MapEntry(key.toString(), value)),
+      'bingoStatus': bingoStatus,
+      'selectedNumbers': selectedNumbers,
+    };
+  }
+
+  factory GameState.fromJson(Map<String, dynamic> json) {
+    return GameState(
+      board: (json['board'] as List).map((row) => 
+        (row as List).map((e) => e as int).toList()
+      ).toList(),
+      marked: (json['marked'] as List).map((e) => e as bool).toList(),
+      isAiSelection: (json['isAiSelection'] as Map).map(
+        (key, value) => MapEntry(int.parse(key as String), value as bool)
+      ),
+      bingoStatus: json['bingoStatus'] as String,
+      selectedNumbers: (json['selectedNumbers'] as List).map((e) => e as int).toList(),
     );
   }
 

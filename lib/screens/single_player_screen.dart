@@ -63,15 +63,19 @@ class SinglePlayerScreenState extends State<SinglePlayerScreen> {
                           if (isPlayerTurn) {
                             setState(() {
                               if (gameService.playerState.markNumber(number)) {
-                                if (gameService.playerState.bingoStatus == "BINGO") {
+                                if (gameService.playerState.bingoStatus ==
+                                    "BINGO") {
                                   _showWinDialog("You won!", isPlayerWin: true);
                                 } else {
                                   isPlayerTurn = false;
-                                  Future.delayed(Duration(milliseconds: 500), () {
+                                  Future.delayed(Duration(milliseconds: 500),
+                                      () {
                                     setState(() {
                                       gameService.aiMove();
-                                      if (gameService.playerState.bingoStatus == "BINGO") {
-                                        _showWinDialog("AI won!", isPlayerWin: false);
+                                      if (gameService.playerState.bingoStatus ==
+                                          "BINGO") {
+                                        _showWinDialog("AI won!",
+                                            isPlayerWin: false);
                                       } else {
                                         isPlayerTurn = true;
                                       }
@@ -82,6 +86,7 @@ class SinglePlayerScreenState extends State<SinglePlayerScreen> {
                             });
                           }
                         },
+                        onRestart: () {},
                       ),
                     ),
                   ),
@@ -149,7 +154,8 @@ class SinglePlayerScreenState extends State<SinglePlayerScreen> {
                 },
                 style: ElevatedButton.styleFrom(
                   backgroundColor: Colors.white,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12)),
                 ),
                 child: Text(
                   "OK",

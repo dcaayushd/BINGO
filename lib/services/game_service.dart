@@ -22,11 +22,9 @@ class GameService {
 
   Future<String> createRoom(String playerName) async {
     try {
-      final roomId =
-          DateTime.now().millisecondsSinceEpoch.toString().substring(7);
-      final gameState = GameState.initial();
+      final roomId = DateTime.now().millisecondsSinceEpoch.toString().substring(7);
+      final player1GameState = GameState.initial();
 
-      // Create initial room structure with more explicit typing
       await _database.child('rooms').child(roomId).set({
         'status': 'waiting',
         'currentTurn': 0,
@@ -34,7 +32,8 @@ class GameService {
         'players': {
           '0': {
             'name': playerName,
-            'gameState': gameState.toJson(),
+            'isReady': false,
+            'gameState': player1GameState.toJson(),
           }
         }
       });
@@ -49,56 +48,24 @@ class GameService {
   Future<bool> joinRoom(String roomId, String playerName) async {
     try {
       final roomRef = _database.child('rooms').child(roomId);
-
-      // Get room data
       final roomSnapshot = await roomRef.get();
       if (!roomSnapshot.exists) {
         debugPrint('Room does not exist');
         return false;
       }
 
-      // Safe conversion to map
-      Map<String, dynamic> roomData = {};
-      try {
-        final dynamic rawData = roomSnapshot.value;
-        if (rawData is Map) {
-          roomData = _convertToStringDynamicMap(rawData);
-        } else {
-          debugPrint('Room data is not a Map: ${rawData.runtimeType}');
-          return false;
-        }
-      } catch (e) {
-        debugPrint('Error converting room data: $e');
-        return false;
-      }
+      final dynamic rawData = roomSnapshot.value;
+      Map<String, dynamic> roomData = _safelyConvertData(rawData);
 
-      // Check room status
       if (roomData['status'] != 'waiting') {
         debugPrint('Room is not in waiting status: ${roomData['status']}');
         return false;
       }
 
-      // Get players data - with safer access
-      final playersData = roomData['players'];
-      if (playersData == null) {
-        debugPrint('No players data found');
-        return false;
-      }
-
       Map<String, dynamic> players = {};
-      if (playersData is Map) {
-        players = _convertToStringDynamicMap(playersData);
-      } else if (playersData is List) {
-        // Handle case where Firebase returns a list
-        for (int i = 0; i < playersData.length; i++) {
-          if (playersData[i] != null) {
-            players[i.toString()] = playersData[i];
-          }
-        }
-      } else {
-        debugPrint(
-            'Players data is not a Map or List: ${playersData.runtimeType}');
-        return false;
+      final playersData = roomData['players'];
+      if (playersData != null) {
+        players = _safelyConvertData(playersData);
       }
 
       if (players.length >= 2 || players.containsKey('1')) {
@@ -106,18 +73,13 @@ class GameService {
         return false;
       }
 
-      // Create player data
-      final gameState = GameState.initial();
-      final updates = {
-        '/players/1': {
-          'name': playerName,
-          'gameState': gameState.toJson(),
-        },
-        '/status': 'playing',
-      };
+      final player2GameState = GameState.initial();
+      await roomRef.child('players/1').set({
+        'name': playerName,
+        'isReady': false,
+        'gameState': player2GameState.toJson(),
+      });
 
-      // Update room data
-      await roomRef.update(updates);
       return true;
     } catch (e) {
       debugPrint('Error joining room: $e');
@@ -139,122 +101,145 @@ class GameService {
           return {};
         }
 
-        // Print the actual type for debugging
         debugPrint('Room data type: ${value.runtimeType}');
-
-        // Convert DataSnapshot value to a Map<String, dynamic>
-        if (value is Map) {
-          return _processRoomData(value);
-        } else {
-          debugPrint('Room data is not a Map: ${value.runtimeType}');
-          return {};
-        }
+        return _safelyConvertData(value);
       } catch (e) {
         debugPrint('Error processing room data: $e');
-        return {};
+        return {'error': e.toString()};
       }
     });
   }
 
-  // Process room data with better error handling
-  Map<String, dynamic> _processRoomData(Map rawData) {
-    Map<String, dynamic> roomData = {};
+  Map<String, dynamic> _safelyConvertData(dynamic data) {
+    if (data == null) return {};
 
-    rawData.forEach((key, val) {
-      if (key is String) {
-        if (key == 'players' && val != null) {
-          Map<String, dynamic> players = {};
+    if (data is Map) {
+      final Map<String, dynamic> result = {};
 
-          if (val is Map) {
-            val.forEach((playerKey, playerValue) {
-              if (playerKey is String && playerValue is Map) {
-                players[playerKey] = _convertToStringDynamicMap(playerValue);
-              }
-            });
-          } else if (val is List) {
-            // Handle list format from Firebase
-            for (int i = 0; i < val.length; i++) {
-              if (val[i] != null) {
-                players[i.toString()] =
-                    val[i] is Map ? _convertToStringDynamicMap(val[i]) : val[i];
-              }
-            }
-          } else {
-            debugPrint('Players data is unexpected type: ${val.runtimeType}');
-          }
+      data.forEach((key, value) {
+        final String stringKey = key.toString();
 
-          roomData[key] = players;
-        } else {
-          roomData[key] = val;
-        }
-      }
-    });
-
-    return roomData;
-  }
-
-  // Helper method to convert Map<Object?, Object?> to Map<String, dynamic>
-  Map<String, dynamic> _convertToStringDynamicMap(Map map) {
-    Map<String, dynamic> result = {};
-    map.forEach((key, value) {
-      if (key is String) {
         if (value is Map) {
-          result[key] = _convertToStringDynamicMap(value);
+          result[stringKey] = _safelyConvertData(value);
         } else if (value is List) {
-          // Handle lists within maps
-          List<dynamic> convertedList = [];
-          for (var item in value) {
-            if (item is Map) {
-              convertedList.add(_convertToStringDynamicMap(item));
-            } else {
-              convertedList.add(item);
+          // For lists that represent players, convert them to maps with string keys
+          if (stringKey == 'players') {
+            Map<String, dynamic> convertedPlayers = {};
+            for (int i = 0; i < value.length; i++) {
+              if (value[i] != null) {
+                convertedPlayers[i.toString()] = _safelyConvertData(value[i]);
+              }
             }
+            result[stringKey] = convertedPlayers;
+          } else {
+            result[stringKey] = value.map((item) {
+              if (item is Map) {
+                return _safelyConvertData(item);
+              }
+              return item;
+            }).toList();
           }
-          result[key] = convertedList;
         } else {
-          result[key] = value;
+          result[stringKey] = value;
         }
-      }
-    });
-    return result;
+      });
+
+      return result;
+    }
+
+    return {};
   }
 
   Future<void> makeMove(String roomId, int playerIndex, int number) async {
     try {
       final roomRef = _database.child('rooms').child(roomId);
-      final playerRef = roomRef.child('players').child(playerIndex.toString());
 
-      final playerSnapshot = await playerRef.get();
-      if (!playerSnapshot.exists) {
-        debugPrint('Player data does not exist');
+      // First, check if it's this player's turn
+      final roomSnapshot = await roomRef.get();
+      if (!roomSnapshot.exists) {
+        debugPrint('Room does not exist');
         return;
       }
 
-      // Better type handling
-      final dynamic playerValue = playerSnapshot.value;
-      if (playerValue is! Map) {
-        debugPrint('Player data is not a Map: ${playerValue.runtimeType}');
+      final dynamic roomData = roomSnapshot.value;
+      debugPrint('Room data for move: $roomData');
+
+      // Convert the data structure safely
+      final Map<String, dynamic> roomMap = _safelyConvertData(roomData);
+
+      int currentTurn = roomMap['currentTurn'] as int? ?? 0;
+      if (currentTurn != playerIndex) {
+        debugPrint('Not player\'s turn. Current turn: $currentTurn, player: $playerIndex');
         return;
       }
 
-      final Map<String, dynamic> playerData =
-          _convertToStringDynamicMap(playerValue);
-      final dynamic gameStateValue = playerData['gameState'];
-
-      if (gameStateValue is! Map) {
-        debugPrint(
-            'GameState data is not a Map: ${gameStateValue.runtimeType}');
+      // Get player data using correct path
+      final playersData = roomMap['players'];
+      if (playersData == null) {
+        debugPrint('No players data found in room');
         return;
       }
 
-      final gameState =
-          GameState.fromJson(_convertToStringDynamicMap(gameStateValue));
+      Map<String, dynamic> players = _safelyConvertData(playersData);
+      final String playerKey = playerIndex.toString();
 
-      if (gameState.markNumber(number)) {
-        await playerRef.update({'gameState': gameState.toJson()});
+      // Debug players data structure
+      debugPrint('Players data: $players');
+      debugPrint('Player keys: ${players.keys.toList()}');
+      
+      if (!players.containsKey(playerKey)) {
+        debugPrint('Player $playerIndex not found in players data');
+        return;
+      }
 
+      final Map<String, dynamic> currentPlayerData = _safelyConvertData(players[playerKey]);
+
+      // Verify gameState exists
+      if (!currentPlayerData.containsKey('gameState')) {
+        debugPrint('GameState not found in player data. Available keys: ${currentPlayerData.keys.toList()}');
+        return;
+      }
+
+      final gameStateData = currentPlayerData['gameState'];
+      if (gameStateData == null) {
+        debugPrint('GameState is null');
+        return;
+      }
+
+      final Map<String, dynamic> gameStateMap = _safelyConvertData(gameStateData);
+      final gameState = GameState.fromJson(gameStateMap);
+
+      // Mark number on current player's board with player index
+      if (gameState.markNumber(number, playerIndex: playerIndex)) {
+        debugPrint('Marking number $number for player $playerIndex');
+
+        // Update current player's game state
+        await roomRef.child('players').child(playerKey).child('gameState').set(gameState.toJson());
+
+        // Get opponent index
+        final opponentIndex = (playerIndex + 1) % 2;
+        final opponentKey = opponentIndex.toString();
+
+        // Update opponent's board with the same number
+        if (players.containsKey(opponentKey)) {
+          final Map<String, dynamic> opponentPlayerData = _safelyConvertData(players[opponentKey]);
+
+          if (opponentPlayerData.containsKey('gameState')) {
+            final opponentGameStateData = opponentPlayerData['gameState'];
+            final Map<String, dynamic> opponentGameStateMap = _safelyConvertData(opponentGameStateData);
+            final opponentGameState = GameState.fromJson(opponentGameStateMap);
+
+            // Mark the SAME number on opponent's board, indicate it was selected by the current player
+            opponentGameState.markNumber(number, playerIndex: playerIndex);
+
+            // Update opponent's game state
+            await roomRef.child('players').child(opponentKey).child('gameState').set(opponentGameState.toJson());
+          }
+        }
+
+        // Update turn and last move
         await roomRef.update({
-          'currentTurn': (playerIndex + 1) % 2,
+          'currentTurn': opponentIndex,
           'lastMove': number,
         });
       }
@@ -271,14 +256,10 @@ class GameService {
 
     try {
       final roomRef = _database.child('rooms').child(roomId);
-
-      // Remove player
       await roomRef.child('players').child(playerIndex.toString()).remove();
 
-      // Check remaining players
       final playersSnapshot = await roomRef.child('players').get();
-      if (!playersSnapshot.exists) {
-        // No players left, remove the room
+      if (!playersSnapshot.exists || playersSnapshot.value == null) {
         await roomRef.remove();
         return;
       }
@@ -286,9 +267,7 @@ class GameService {
       final dynamic playersValue = playersSnapshot.value;
       bool shouldRemoveRoom = false;
 
-      if (playersValue == null) {
-        shouldRemoveRoom = true;
-      } else if (playersValue is Map && playersValue.isEmpty) {
+      if (playersValue is Map && playersValue.isEmpty) {
         shouldRemoveRoom = true;
       } else if (playersValue is List) {
         bool hasPlayers = false;
@@ -302,10 +281,8 @@ class GameService {
       }
 
       if (shouldRemoveRoom) {
-        // If no players left, remove the room
         await roomRef.remove();
       } else {
-        // Otherwise, mark the room as ended
         await roomRef.update({'status': 'ended'});
       }
     } catch (e) {

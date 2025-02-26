@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-
 import '../models/game_state.dart';
 import '../widgets/bingo_cell.dart';
 
@@ -22,7 +21,6 @@ class BingoBoard extends StatelessWidget {
         Container(
           padding: EdgeInsets.symmetric(vertical: 12, horizontal: 24),
           decoration: BoxDecoration(
-            // color: Colors.white.withOpacity(0.15),
             gradient: LinearGradient(
               colors: [
                 Color.fromRGBO(156, 39, 176, 0.7),
@@ -57,7 +55,6 @@ class BingoBoard extends StatelessWidget {
         ),
         Container(
           decoration: BoxDecoration(
-            // color: Colors.white.withOpacity(0.15),
             gradient: LinearGradient(
               colors: [
                 Color.fromRGBO(156, 39, 176, 0.7),
@@ -85,9 +82,11 @@ class BingoBoard extends StatelessWidget {
               int row = index ~/ 5;
               int col = index % 5;
               int number = gameState.board[row][col];
+              bool isMarked = gameState.marked[
+                  index]; // Use the index to check if the number is marked
               return BingoCell(
                 number: number,
-                marked: gameState.marked[number - 1],
+                marked: isMarked,
                 isAiSelection: gameState.isAiSelection[number] ?? false,
                 onTap: () => onNumberSelected(number),
               );

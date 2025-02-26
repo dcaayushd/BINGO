@@ -24,8 +24,8 @@ class BingoCell extends StatelessWidget {
               Border.all(color: Color.fromRGBO(255, 255, 255, 0.2), width: 1),
           color: marked
               ? (isAiSelection
-                  ? Color.fromRGBO(255, 152, 0, 0.9) // Bolder orange
-                  : Color.fromRGBO(76, 175, 80, 0.9)) // Bolder green
+                  ? Color.fromRGBO(255, 152, 0, 0.9) // Orange for AI
+                  : Color.fromRGBO(76, 175, 80, 0.9)) // Green for player
               : Colors.white,
           borderRadius: BorderRadius.circular(12),
           boxShadow: [

@@ -1,3 +1,4 @@
+import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:confetti/confetti.dart';
 import '/services/game_service.dart';
@@ -14,6 +15,7 @@ class SinglePlayerScreenState extends State<SinglePlayerScreen> {
   final GameService gameService = GameService();
   bool isPlayerTurn = true;
   late ConfettiController _confettiController;
+  final _random = Random();
 
   @override
   void initState() {
@@ -59,24 +61,59 @@ class SinglePlayerScreenState extends State<SinglePlayerScreen> {
                       padding: EdgeInsets.all(16),
                       child: BingoBoard(
                         gameState: gameService.playerState,
+                        // onNumberSelected: (number) {
+                        //   if (isPlayerTurn) {
+                        //     setState(() {
+                        //       // Mark the user's selected number
+                        //       if (gameService.playerState.markNumber(number)) {
+                        //         // Check if the user has won
+                        //         if (gameService.playerState.bingoStatus == "BINGO") {
+                        //           _showWinDialog("You won!", isPlayerWin: true);
+                        //         } else {
+                        //           // Switch to AI's turn
+                        //           isPlayerTurn = false;
+                        //           Future.delayed(Duration(milliseconds: 500), () {
+                        //             setState(() {
+                        //               // Let the AI make a move
+                        //               _aiMove();
+                        //               // Check if the AI has won
+                        //               if (gameService.playerState.bingoStatus == "BINGO") {
+                        //                 _showWinDialog("AI won!", isPlayerWin: false);
+                        //               } else {
+                        //                 // Switch back to the user's turn
+                        //                 isPlayerTurn = true;
+                        //               }
+                        //             });
+                        //           });
+                        //         }
+                        //       }
+                        //     });
+                        //   }
+                        // },
                         onNumberSelected: (number) {
                           if (isPlayerTurn) {
                             setState(() {
+                              // Mark the user's selected number
                               if (gameService.playerState.markNumber(number)) {
+                                // Check if the user has won
                                 if (gameService.playerState.bingoStatus ==
                                     "BINGO") {
                                   _showWinDialog("You won!", isPlayerWin: true);
                                 } else {
+                                  // Switch to AI's turn
                                   isPlayerTurn = false;
                                   Future.delayed(Duration(milliseconds: 500),
                                       () {
                                     setState(() {
-                                      gameService.aiMove();
+                                      // Let the AI make a move
+                                      _aiMove();
+                                      // Check if the AI has won
                                       if (gameService.playerState.bingoStatus ==
                                           "BINGO") {
                                         _showWinDialog("AI won!",
                                             isPlayerWin: false);
                                       } else {
+                                        // Switch back to the user's turn
                                         isPlayerTurn = true;
                                       }
                                     });
@@ -86,7 +123,12 @@ class SinglePlayerScreenState extends State<SinglePlayerScreen> {
                             });
                           }
                         },
-                        onRestart: () {},
+                        onRestart: () {
+                          setState(() {
+                            gameService.playerState.reset();
+                            isPlayerTurn = true;
+                          });
+                        },
                       ),
                     ),
                   ),
@@ -155,7 +197,8 @@ class SinglePlayerScreenState extends State<SinglePlayerScreen> {
                 style: ElevatedButton.styleFrom(
                   backgroundColor: Colors.white,
                   shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12)),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
                 ),
                 child: Text(
                   "OK",
@@ -170,5 +213,18 @@ class SinglePlayerScreenState extends State<SinglePlayerScreen> {
         ),
       ),
     );
+  }
+
+  void _aiMove() {
+    List<int> availableNumbers = List.generate(25, (i) => i + 1)
+        .where((n) => !gameService.playerState.selectedNumbers.contains(n))
+        .toList();
+
+    if (availableNumbers.isNotEmpty) {
+      int number = availableNumbers[_random.nextInt(availableNumbers.length)];
+      setState(() {
+        gameService.playerState.markNumber(number, isAi: true);
+      });
+    }
   }
 }

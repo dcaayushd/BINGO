@@ -6,14 +6,16 @@ class BingoBoard extends StatelessWidget {
   final Function(int) onNumberSelected;
   final VoidCallback onRestart;
   final bool showOpponentColors;
+  final int? playerIndex;
 
   const BingoBoard({
-    Key? key,
+    super.key,
     required this.gameState,
     required this.onNumberSelected,
     required this.onRestart,
     this.showOpponentColors = false,
-  }) : super(key: key);
+    this.playerIndex,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -87,9 +89,11 @@ class BingoBoard extends StatelessWidget {
             child: Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                _buildColorDot(Colors.green, "Your selections"),
+                _buildColorDot(playerIndex == 0 ? Colors.green : Colors.orange,
+                    "Your selections"),
                 SizedBox(width: 12),
-                _buildColorDot(Colors.orange, "Opponent's selections"),
+                _buildColorDot(playerIndex == 0 ? Colors.orange : Colors.green,
+                    "Opponent's selections"),
               ],
             ),
           ),
@@ -151,7 +155,7 @@ class BingoBoard extends StatelessWidget {
       if (showOpponentColors &&
           gameState.playerSelections.containsKey(number)) {
         int playerWhoSelected = gameState.playerSelections[number] ?? -1;
-        
+
         // Always use green for player 0 and orange for player 1 in multiplayer
         cellColor = playerWhoSelected == 0 ? Colors.green : Colors.orange;
       } else {

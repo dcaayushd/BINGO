@@ -61,35 +61,6 @@ class SinglePlayerScreenState extends State<SinglePlayerScreen> {
                       padding: EdgeInsets.all(16),
                       child: BingoBoard(
                         gameState: gameService.playerState,
-                        // onNumberSelected: (number) {
-                        //   if (isPlayerTurn) {
-                        //     setState(() {
-                        //       // Mark the user's selected number
-                        //       if (gameService.playerState.markNumber(number)) {
-                        //         // Check if the user has won
-                        //         if (gameService.playerState.bingoStatus == "BINGO") {
-                        //           _showWinDialog("You won!", isPlayerWin: true);
-                        //         } else {
-                        //           // Switch to AI's turn
-                        //           isPlayerTurn = false;
-                        //           Future.delayed(Duration(milliseconds: 500), () {
-                        //             setState(() {
-                        //               // Let the AI make a move
-                        //               _aiMove();
-                        //               // Check if the AI has won
-                        //               if (gameService.playerState.bingoStatus == "BINGO") {
-                        //                 _showWinDialog("AI won!", isPlayerWin: false);
-                        //               } else {
-                        //                 // Switch back to the user's turn
-                        //                 isPlayerTurn = true;
-                        //               }
-                        //             });
-                        //           });
-                        //         }
-                        //       }
-                        //     });
-                        //   }
-                        // },
                         onNumberSelected: (number) {
                           if (isPlayerTurn) {
                             setState(() {

@@ -122,8 +122,9 @@ class GameService {
         if (value is Map) {
           result[stringKey] = _safelyConvertData(value);
         } else if (value is List) {
-          // For lists that represent players, convert them to maps with string keys
+          // Handle lists properly
           if (stringKey == 'players') {
+            // Convert player list to map with string keys
             Map<String, dynamic> convertedPlayers = {};
             for (int i = 0; i < value.length; i++) {
               if (value[i] != null) {
@@ -131,7 +132,11 @@ class GameService {
               }
             }
             result[stringKey] = convertedPlayers;
+          } else if (stringKey == 'selectedNumbers') {
+            // Keep selected numbers as a list
+            result[stringKey] = value.where((item) => item != null).toList();
           } else {
+            // For other lists
             result[stringKey] = value.map((item) {
               if (item is Map) {
                 return _safelyConvertData(item);
@@ -180,13 +185,27 @@ class GameService {
         return;
       }
 
-      Map<String, dynamic> players = _safelyConvertData(playersData);
-      final String playerKey = playerIndex.toString();
+      Map<String, dynamic> players = {};
+      
+      if (playersData is Map) {
+        players = _safelyConvertData(playersData);
+      } else if (playersData is List) {
+        // Handle the case where players come as a list
+        for (int i = 0; i < playersData.length; i++) {
+          if (playersData[i] != null) {
+            players[i.toString()] = _safelyConvertData(playersData[i]);
+          }
+        }
+      } else {
+        debugPrint('Players data has unexpected type: ${playersData.runtimeType}');
+        return;
+      }
 
       // Debug players data structure
       debugPrint('Players data: $players');
       debugPrint('Player keys: ${players.keys.toList()}');
       
+      final String playerKey = playerIndex.toString();
       if (!players.containsKey(playerKey)) {
         debugPrint('Player $playerIndex not found in players data');
         return;

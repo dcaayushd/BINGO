@@ -5,8 +5,7 @@ class GameState {
   String bingoStatus; // Current BINGO status (e.g., "B", "BI", "BIN", etc.)
   String roomId; // Room ID for multiplayer
   List<int> selectedNumbers; // List of selected numbers
-  Map<int, int> playerSelections =
-      {}; // Tracks which player selected each number
+  Map<int, int> playerSelections; // Tracks which player selected each number
 
   GameState({
     required this.board,
@@ -56,32 +55,99 @@ class GameState {
 
   // Create GameState from JSON (Firebase data)
   factory GameState.fromJson(Map<String, dynamic> json) {
+    // Parse player selections with better error handling
     Map<int, int> parsePlayerSelections(dynamic data) {
       Map<int, int> result = {};
+      if (data != null) {
+        if (data is Map) {
+          data.forEach((key, value) {
+            try {
+              final numKey = int.parse(key.toString());
+              final numValue = int.tryParse(value.toString()) ?? -1;
+              result[numKey] = numValue;
+            } catch (e) {
+              print('Error parsing player selection: $e');
+            }
+          });
+        }
+      }
+      return result;
+    }
+
+    // Parse board with error handling
+    List<List<int>> parseBoard(dynamic data) {
+      List<List<int>> result = List.generate(5, (_) => List.generate(5, (_) => 0));
+      if (data != null && data is List) {
+        for (int i = 0; i < data.length && i < 5; i++) {
+          var row = data[i];
+          if (row is List) {
+            for (int j = 0; j < row.length && j < 5; j++) {
+              try {
+                result[i][j] = (row[j] is int) ? row[j] : int.parse(row[j].toString());
+              } catch (e) {
+                print('Error parsing board value: $e');
+              }
+            }
+          }
+        }
+      }
+      return result;
+    }
+
+    // Parse marked with error handling
+    List<bool> parseMarked(dynamic data) {
+      List<bool> result = List.filled(25, false);
+      if (data != null && data is List) {
+        for (int i = 0; i < data.length && i < 25; i++) {
+          result[i] = (data[i] == true);
+        }
+      }
+      return result;
+    }
+
+    // Parse AI selections with error handling
+    Map<int, bool> parseAiSelections(dynamic data) {
+      Map<int, bool> result = {};
       if (data != null && data is Map) {
         data.forEach((key, value) {
-          result[int.parse(key as String)] = value as int;
+          try {
+            final numKey = int.parse(key.toString());
+            result[numKey] = (value == true);
+          } catch (e) {
+            print('Error parsing AI selection: $e');
+          }
         });
       }
       return result;
     }
 
+    // Parse selected numbers
+    List<int> parseSelectedNumbers(dynamic data) {
+      List<int> result = [];
+      if (data != null && data is List) {
+        for (var item in data) {
+          try {
+            if (item is int) {
+              result.add(item);
+            } else {
+              result.add(int.parse(item.toString()));
+            }
+          } catch (e) {
+            print('Error parsing selected number: $e');
+          }
+        }
+      }
+      return result;
+    }
+
     return GameState(
-      board: (json['board'] as List?)
-              ?.map((row) => (row as List).map((e) => e as int).toList())
-              .toList() ??
-          List.generate(5, (_) => List.generate(5, (_) => 0)),
-      marked: (json['marked'] as List?)?.map((e) => e as bool).toList() ??
-          List.filled(25, false),
-      isAiSelection: (json['isAiSelection'] as Map?)?.map((key, value) =>
-              MapEntry(int.parse(key as String), value as bool)) ??
-          {},
+      board: parseBoard(json['board']),
+      marked: parseMarked(json['marked']),
+      isAiSelection: parseAiSelections(json['isAiSelection']),
       playerSelections: parsePlayerSelections(json['playerSelections']),
       bingoStatus: json['bingoStatus'] as String? ?? "",
       roomId: json['roomId'] as String? ?? "",
-      selectedNumbers:
-          (json['selectedNumbers'] as List?)?.map((e) => e as int).toList() ??
-              [],
+      selectedNumbers: parseSelectedNumbers(json['selectedNumbers']),
     );
   }
 
@@ -100,7 +166,9 @@ class GameState {
           int index = row * 5 + col;
           marked[index] = true;
           isAiSelection[number] = isAi;
-          playerSelections[number] = playerIndex;
+          if (playerIndex >= 0) {
+            playerSelections[number] = playerIndex;
+          }
           selectedNumbers.add(number);
           updateBingoStatus();
           return true;

@@ -75,129 +75,161 @@ class MultiplayerScreenState extends State<MultiplayerScreen> {
   }
 
   Map<String, dynamic> _safelyConvertData(dynamic data) {
-    if (data == null) return {};
+  if (data == null) return {};
 
-    if (data is Map) {
-      final Map<String, dynamic> result = {};
+  if (data is Map) {
+    final Map<String, dynamic> result = {};
 
-      data.forEach((key, value) {
-        final String stringKey = key.toString();
+    data.forEach((key, value) {
+      final String stringKey = key.toString();
 
-        if (value is Map) {
-          result[stringKey] = _safelyConvertData(value);
-        } else if (value is List) {
-          if (stringKey == 'players') {
-            Map<String, dynamic> convertedPlayers = {};
-            for (int i = 0; i < value.length; i++) {
-              if (value[i] != null) {
-                convertedPlayers[i.toString()] = _safelyConvertData(value[i]);
-              }
+      if (value is Map) {
+        result[stringKey] = _safelyConvertData(value);
+      } else if (value is List) {
+        // For lists that might be in player selections or game state
+        if (stringKey == 'players') {
+          // Convert player list to map with string keys
+          Map<String, dynamic> convertedPlayers = {};
+          for (int i = 0; i < value.length; i++) {
+            if (value[i] != null) {
+              convertedPlayers[i.toString()] = _safelyConvertData(value[i]);
             }
-            result[stringKey] = convertedPlayers;
-          } else {
-            result[stringKey] = value.map((item) {
-              if (item is Map) {
-                return _safelyConvertData(item);
-              }
-              return item;
-            }).toList();
           }
+          result[stringKey] = convertedPlayers;
+        } else if (stringKey == 'selectedNumbers') {
+          // Keep selected numbers as a list
+          result[stringKey] = value.where((item) => item != null).toList();
+        } else if (stringKey == 'board') {
+          // Handle board as a 2D array
+          List<List<dynamic>> boardList = [];
+          for (int i = 0; i < value.length; i++) {
+            if (value[i] is List) {
+              boardList.add(List<dynamic>.from(value[i].where((cell) => cell != null)));
+            }
+          }
+          result[stringKey] = boardList;
         } else {
-          result[stringKey] = value;
+          // Default handling for other list types
+          result[stringKey] = value.map((item) {
+            if (item is Map) {
+              return _safelyConvertData(item);
+            }
+            return item;
+          }).toList();
         }
-      });
+      } else {
+        // For non-collection types, just assign the value
+        result[stringKey] = value;
+      }
+    });
 
-      return result;
-    }
-
-    return {};
+    return result;
   }
+
+  return {};
+}
 
   void _handleRoomUpdate(Map<Object?, Object?> rawRoomData) {
-    try {
-      if (rawRoomData.isEmpty) {
-        print('Room data is empty');
-        return;
-      }
-
-      print('Raw room data type: ${rawRoomData.runtimeType}');
-
-      final roomData = _safelyConvertData(rawRoomData);
-      print('Processed room data: $roomData');
-
-      final status = roomData['status'] as String? ?? 'waiting';
-      final currentTurn = roomData['currentTurn'] as int? ?? 0;
-
-      final playersData = roomData['players'];
-      if (playersData == null) {
-        print('No players data found');
-        return;
-      }
-
-      Map<String, dynamic> players = {};
-      if (playersData is Map) {
-        players = _safelyConvertData(playersData);
-      }
-
-      if (playerIndex < 0 || !players.containsKey(playerIndex.toString())) {
-        print('Player index $playerIndex not found in room');
-        return;
-      }
-
-      setState(() {
-        final playerData = players[playerIndex.toString()];
-        if (playerData != null && playerData is Map) {
-          final gameStateData = playerData['gameState'];
-          if (gameStateData != null && gameStateData is Map) {
-            gameState = GameState.fromJson(_safelyConvertData(gameStateData));
-          }
-          isPlayerReady = playerData['isReady'] == true;
-        }
-
-        final opponentIndex = playerIndex == 0 ? '1' : '0';
-        final wasOpponentJoined = opponentJoined;
-        opponentJoined = players.containsKey(opponentIndex);
-
-        if (opponentJoined) {
-          final opponentData = players[opponentIndex];
-          if (opponentData != null && opponentData is Map) {
-            final newOpponentName = opponentData['name'] as String? ?? "Opponent";
-
-            if (!wasOpponentJoined) {
-              notificationMessage = "$newOpponentName has joined the room!";
-              Future.delayed(Duration(seconds: 3), () {
-                if (mounted) {
-                  setState(() {
-                    notificationMessage = "";
-                  });
-                }
-              });
-            }
-
-            opponentName = newOpponentName;
-            isOpponentReady = opponentData['isReady'] == true;
-          }
-        }
-
-        isMyTurn = currentTurn == playerIndex;
-        gameStarted = (status == 'playing' && opponentJoined);
-
-        if (isPlayerReady && isOpponentReady && opponentJoined && status == 'waiting') {
-          print('Both players ready - updating game status to playing');
-          _database.child('rooms').child(roomId).update({
-            'status': 'playing',
-            'currentTurn': 0,
-          });
-        }
-
-        if (gameState?.bingoStatus == "BINGO") {
-          _showWinDialog("You won!", isPlayerWin: true);
-        }
-      });
-    } catch (e) {
-      print('Error handling room update: $e');
+  try {
+    if (rawRoomData.isEmpty) {
+      print('Room data is empty');
+      return;
     }
+
+    print('Raw room data type: ${rawRoomData.runtimeType}');
+
+    final roomData = _safelyConvertData(rawRoomData);
+    print('Processed room data: $roomData');
+
+    final status = roomData['status'] as String? ?? 'waiting';
+    final currentTurn = roomData['currentTurn'] as int? ?? 0;
+    final lastMove = roomData['lastMove'] as int?;  // Track the last move
+
+    final playersData = roomData['players'];
+    if (playersData == null) {
+      print('No players data found');
+      return;
+    }
+
+    Map<String, dynamic> players = {};
+    
+    if (playersData is Map) {
+      players = _safelyConvertData(playersData);
+    } else if (playersData is List) {
+      // Convert list to map
+      for (int i = 0; i < playersData.length; i++) {
+        if (playersData[i] != null) {
+          players[i.toString()] = _safelyConvertData(playersData[i]);
+        }
+      }
+    }
+
+    if (playerIndex < 0 || !players.containsKey(playerIndex.toString())) {
+      print('Player index $playerIndex not found in room');
+      return;
+    }
+
+    setState(() {
+      final playerData = players[playerIndex.toString()];
+      GameState? updatedGameState;
+      
+      if (playerData != null && playerData is Map) {
+        final gameStateData = playerData['gameState'];
+        if (gameStateData != null && gameStateData is Map) {
+          updatedGameState = GameState.fromJson(_safelyConvertData(gameStateData));
+        }
+        isPlayerReady = playerData['isReady'] == true;
+      }
+
+      final opponentIndex = playerIndex == 0 ? '1' : '0';
+      final wasOpponentJoined = opponentJoined;
+      opponentJoined = players.containsKey(opponentIndex);
+
+      if (opponentJoined) {
+        final opponentData = players[opponentIndex];
+        if (opponentData != null && opponentData is Map) {
+          final newOpponentName = opponentData['name'] as String? ?? "Opponent";
+
+          if (!wasOpponentJoined) {
+            notificationMessage = "$newOpponentName has joined the room!";
+            Future.delayed(Duration(seconds: 3), () {
+              if (mounted) {
+                setState(() {
+                  notificationMessage = "";
+                });
+              }
+            });
+          }
+
+          opponentName = newOpponentName;
+          isOpponentReady = opponentData['isReady'] == true;
+        }
+      }
+
+      isMyTurn = currentTurn == playerIndex;
+      gameStarted = (status == 'playing' && opponentJoined);
+      
+      // Only update the game state if we actually have a valid update
+      if (updatedGameState != null) {
+        gameState = updatedGameState;
+      }
+
+      if (isPlayerReady && isOpponentReady && opponentJoined && status == 'waiting') {
+        print('Both players ready - updating game status to playing');
+        _database.child('rooms').child(roomId).update({
+          'status': 'playing',
+          'currentTurn': 0,
+        });
+      }
+
+      if (gameState?.bingoStatus == "BINGO") {
+        _showWinDialog("You won!", isPlayerWin: true);
+      }
+    });
+  } catch (e) {
+    print('Error handling room update: $e');
   }
+}
 
   void _startListeningToRoom() {
     _roomSubscription = gameService.getRoomStream(roomId).listen((roomData) {
@@ -208,42 +240,42 @@ class MultiplayerScreenState extends State<MultiplayerScreen> {
   }
 
   Future<void> _createRoom() async {
-  setState(() => isLoading = true);
-  try {
-    final newRoomId = await gameService.createRoom(playerName);
-    setState(() {
-      roomId = newRoomId;
-      playerIndex = 0; // First player is always index 0
-      _startListeningToRoom();
-    });
-  } catch (e) {
-    _showErrorSnackBar('Error creating room');
-    print('Error creating room: $e');
-  } finally {
-    setState(() => isLoading = false);
-  }
-}
-
-Future<void> _joinRoom(String roomId) async {
-  setState(() => isLoading = true);
-  try {
-    final success = await gameService.joinRoom(roomId.trim(), playerName);
-    if (success) {
+    setState(() => isLoading = true);
+    try {
+      final newRoomId = await gameService.createRoom(playerName);
       setState(() {
-        this.roomId = roomId.trim();
-        playerIndex = 1; // Second player is always index 1
+        roomId = newRoomId;
+        playerIndex = 0; // First player is always index 0
         _startListeningToRoom();
       });
-    } else {
-      _showErrorSnackBar('Invalid Room ID or Room Full');
+    } catch (e) {
+      _showErrorSnackBar('Error creating room');
+      print('Error creating room: $e');
+    } finally {
+      setState(() => isLoading = false);
     }
-  } catch (e) {
-    _showErrorSnackBar('Error joining room');
-    print('Error joining room: $e');
-  } finally {
-    setState(() => isLoading = false);
   }
-}
+
+  Future<void> _joinRoom(String roomId) async {
+    setState(() => isLoading = true);
+    try {
+      final success = await gameService.joinRoom(roomId.trim(), playerName);
+      if (success) {
+        setState(() {
+          this.roomId = roomId.trim();
+          playerIndex = 1; // Second player is always index 1
+          _startListeningToRoom();
+        });
+      } else {
+        _showErrorSnackBar('Invalid Room ID or Room Full');
+      }
+    } catch (e) {
+      _showErrorSnackBar('Error joining room');
+      print('Error joining room: $e');
+    } finally {
+      setState(() => isLoading = false);
+    }
+  }
 
   Future<void> _toggleReadyStatus() async {
     if (roomId.isEmpty || playerIndex < 0) return;
@@ -577,6 +609,7 @@ Future<void> _joinRoom(String roomId) async {
                 }
               },
               onRestart: _restartGame,
+              showOpponentColors: true, // Make sure to show opponent colors
             ),
           ),
 

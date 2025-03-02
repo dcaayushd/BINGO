@@ -22,7 +22,8 @@ class GameService {
 
   Future<String> createRoom(String playerName) async {
     try {
-      final roomId = DateTime.now().millisecondsSinceEpoch.toString().substring(7);
+      final roomId =
+          DateTime.now().millisecondsSinceEpoch.toString().substring(7);
       final player1GameState = GameState.initial();
 
       await _database.child('rooms').child(roomId).set({
@@ -159,7 +160,7 @@ class GameService {
     try {
       final roomRef = _database.child('rooms').child(roomId);
 
-      // First, check if it's this player's turn
+      // Check if it's this player's turn
       final roomSnapshot = await roomRef.get();
       if (!roomSnapshot.exists) {
         debugPrint('Room does not exist');
@@ -167,65 +168,40 @@ class GameService {
       }
 
       final dynamic roomData = roomSnapshot.value;
-      debugPrint('Room data for move: $roomData');
-
-      // Convert the data structure safely
       final Map<String, dynamic> roomMap = _safelyConvertData(roomData);
 
       int currentTurn = roomMap['currentTurn'] as int? ?? 0;
       if (currentTurn != playerIndex) {
-        debugPrint('Not player\'s turn. Current turn: $currentTurn, player: $playerIndex');
+        debugPrint(
+            'Not player\'s turn. Current turn: $currentTurn, player: $playerIndex');
         return;
       }
 
-      // Get player data using correct path
+      // Get player data
       final playersData = roomMap['players'];
       if (playersData == null) {
         debugPrint('No players data found in room');
         return;
       }
 
-      Map<String, dynamic> players = {};
-      
-      if (playersData is Map) {
-        players = _safelyConvertData(playersData);
-      } else if (playersData is List) {
-        // Handle the case where players come as a list
-        for (int i = 0; i < playersData.length; i++) {
-          if (playersData[i] != null) {
-            players[i.toString()] = _safelyConvertData(playersData[i]);
-          }
-        }
-      } else {
-        debugPrint('Players data has unexpected type: ${playersData.runtimeType}');
-        return;
-      }
+      Map<String, dynamic> players = _safelyConvertData(playersData);
 
-      // Debug players data structure
-      debugPrint('Players data: $players');
-      debugPrint('Player keys: ${players.keys.toList()}');
-      
       final String playerKey = playerIndex.toString();
       if (!players.containsKey(playerKey)) {
         debugPrint('Player $playerIndex not found in players data');
         return;
       }
 
-      final Map<String, dynamic> currentPlayerData = _safelyConvertData(players[playerKey]);
-
-      // Verify gameState exists
-      if (!currentPlayerData.containsKey('gameState')) {
-        debugPrint('GameState not found in player data. Available keys: ${currentPlayerData.keys.toList()}');
-        return;
-      }
-
+      final Map<String, dynamic> currentPlayerData =
+          _safelyConvertData(players[playerKey]);
       final gameStateData = currentPlayerData['gameState'];
       if (gameStateData == null) {
         debugPrint('GameState is null');
         return;
       }
 
-      final Map<String, dynamic> gameStateMap = _safelyConvertData(gameStateData);
+      final Map<String, dynamic> gameStateMap =
+          _safelyConvertData(gameStateData);
       final gameState = GameState.fromJson(gameStateMap);
 
       // Mark number on current player's board with player index
@@ -233,7 +209,11 @@ class GameService {
         debugPrint('Marking number $number for player $playerIndex');
 
         // Update current player's game state
-        await roomRef.child('players').child(playerKey).child('gameState').set(gameState.toJson());
+        await roomRef
+            .child('players')
+            .child(playerKey)
+            .child('gameState')
+            .set(gameState.toJson());
 
         // Get opponent index
         final opponentIndex = (playerIndex + 1) % 2;
@@ -241,18 +221,24 @@ class GameService {
 
         // Update opponent's board with the same number
         if (players.containsKey(opponentKey)) {
-          final Map<String, dynamic> opponentPlayerData = _safelyConvertData(players[opponentKey]);
+          final Map<String, dynamic> opponentPlayerData =
+              _safelyConvertData(players[opponentKey]);
 
           if (opponentPlayerData.containsKey('gameState')) {
             final opponentGameStateData = opponentPlayerData['gameState'];
-            final Map<String, dynamic> opponentGameStateMap = _safelyConvertData(opponentGameStateData);
+            final Map<String, dynamic> opponentGameStateMap =
+                _safelyConvertData(opponentGameStateData);
             final opponentGameState = GameState.fromJson(opponentGameStateMap);
 
             // Mark the SAME number on opponent's board, indicate it was selected by the current player
             opponentGameState.markNumber(number, playerIndex: playerIndex);
 
             // Update opponent's game state
-            await roomRef.child('players').child(opponentKey).child('gameState').set(opponentGameState.toJson());
+            await roomRef
+                .child('players')
+                .child(opponentKey)
+                .child('gameState')
+                .set(opponentGameState.toJson());
           }
         }
 

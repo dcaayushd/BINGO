@@ -54,24 +54,16 @@ class MultiplayerScreenState extends State<MultiplayerScreen> {
   }
 
   Future<void> _loadName() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      setState(() {
-        playerName = prefs.getString('playerName') ?? "";
-        nameController.text = playerName;
-      });
-    } catch (e) {
-      print('Error loading name: $e');
-    }
+    final prefs = await SharedPreferences.getInstance();
+    setState(() {
+      playerName = prefs.getString('playerName') ?? "";
+      nameController.text = playerName;
+    });
   }
 
   Future<void> _saveName(String name) async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setString('playerName', name);
-    } catch (e) {
-      print('Error saving name: $e');
-    }
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('playerName', name);
   }
 
   Map<String, dynamic> _safelyConvertData(dynamic data) {
@@ -86,7 +78,7 @@ class MultiplayerScreenState extends State<MultiplayerScreen> {
         if (value is Map) {
           result[stringKey] = _safelyConvertData(value);
         } else if (value is List) {
-          // For lists that might be in player selections or game state
+          // Handle lists properly
           if (stringKey == 'players') {
             // Convert player list to map with string keys
             Map<String, dynamic> convertedPlayers = {};
@@ -99,18 +91,8 @@ class MultiplayerScreenState extends State<MultiplayerScreen> {
           } else if (stringKey == 'selectedNumbers') {
             // Keep selected numbers as a list
             result[stringKey] = value.where((item) => item != null).toList();
-          } else if (stringKey == 'board') {
-            // Handle board as a 2D array
-            List<List<dynamic>> boardList = [];
-            for (int i = 0; i < value.length; i++) {
-              if (value[i] is List) {
-                boardList.add(
-                    List<dynamic>.from(value[i].where((cell) => cell != null)));
-              }
-            }
-            result[stringKey] = boardList;
           } else {
-            // Default handling for other list types
+            // For other lists
             result[stringKey] = value.map((item) {
               if (item is Map) {
                 return _safelyConvertData(item);
@@ -119,7 +101,6 @@ class MultiplayerScreenState extends State<MultiplayerScreen> {
             }).toList();
           }
         } else {
-          // For non-collection types, just assign the value
           result[stringKey] = value;
         }
       });
@@ -132,43 +113,19 @@ class MultiplayerScreenState extends State<MultiplayerScreen> {
 
   void _handleRoomUpdate(Map<Object?, Object?> rawRoomData) {
     try {
-      if (rawRoomData.isEmpty) {
-        print('Room data is empty');
-        return;
-      }
-
-      print('Raw room data type: ${rawRoomData.runtimeType}');
+      if (rawRoomData.isEmpty) return;
 
       final roomData = _safelyConvertData(rawRoomData);
-      print('Processed room data: $roomData');
-
       final status = roomData['status'] as String? ?? 'waiting';
       final currentTurn = roomData['currentTurn'] as int? ?? 0;
-      // final lastMove = roomData['lastMove'] as int?; // Track the last move
 
       final playersData = roomData['players'];
-      if (playersData == null) {
-        print('No players data found');
+      if (playersData == null) return;
+
+      Map<String, dynamic> players = _safelyConvertData(playersData);
+
+      if (playerIndex < 0 || !players.containsKey(playerIndex.toString()))
         return;
-      }
-
-      Map<String, dynamic> players = {};
-
-      if (playersData is Map) {
-        players = _safelyConvertData(playersData);
-      } else if (playersData is List) {
-        // Convert list to map
-        for (int i = 0; i < playersData.length; i++) {
-          if (playersData[i] != null) {
-            players[i.toString()] = _safelyConvertData(playersData[i]);
-          }
-        }
-      }
-
-      if (playerIndex < 0 || !players.containsKey(playerIndex.toString())) {
-        print('Player index $playerIndex not found in room');
-        return;
-      }
 
       setState(() {
         final playerData = players[playerIndex.toString()];
@@ -212,8 +169,9 @@ class MultiplayerScreenState extends State<MultiplayerScreen> {
         isMyTurn = currentTurn == playerIndex;
         gameStarted = (status == 'playing' && opponentJoined);
 
-        // Only update the game state if we actually have a valid update
         if (updatedGameState != null) {
+          // updatedGameState.playerSelections = gameState?.playerSelections ?? {};
+          updatedGameState.marked = gameState?.marked ?? List.filled(25, false);
           gameState = updatedGameState;
         }
 
@@ -221,7 +179,6 @@ class MultiplayerScreenState extends State<MultiplayerScreen> {
             isOpponentReady &&
             opponentJoined &&
             status == 'waiting') {
-          print('Both players ready - updating game status to playing');
           _database.child('rooms').child(roomId).update({
             'status': 'playing',
             'currentTurn': 0,
@@ -251,12 +208,11 @@ class MultiplayerScreenState extends State<MultiplayerScreen> {
       final newRoomId = await gameService.createRoom(playerName);
       setState(() {
         roomId = newRoomId;
-        playerIndex = 0; // First player is always index 0
+        playerIndex = 0;
         _startListeningToRoom();
       });
     } catch (e) {
       _showErrorSnackBar('Error creating room');
-      print('Error creating room: $e');
     } finally {
       setState(() => isLoading = false);
     }
@@ -269,7 +225,7 @@ class MultiplayerScreenState extends State<MultiplayerScreen> {
       if (success) {
         setState(() {
           this.roomId = roomId.trim();
-          playerIndex = 1; // Second player is always index 1
+          playerIndex = 1;
           _startListeningToRoom();
         });
       } else {
@@ -277,7 +233,6 @@ class MultiplayerScreenState extends State<MultiplayerScreen> {
       }
     } catch (e) {
       _showErrorSnackBar('Error joining room');
-      print('Error joining room: $e');
     } finally {
       setState(() => isLoading = false);
     }
@@ -299,14 +254,12 @@ class MultiplayerScreenState extends State<MultiplayerScreen> {
       });
 
       if (isPlayerReady && isOpponentReady && opponentJoined) {
-        print('Setting game status to playing after both ready');
         await roomRef.update({
           'status': 'playing',
           'currentTurn': 0,
         });
       }
     } catch (e) {
-      print('Error toggling ready status: $e');
       _showErrorSnackBar('Error updating ready status');
       setState(() {
         isPlayerReady = !isPlayerReady;
@@ -344,9 +297,6 @@ class MultiplayerScreenState extends State<MultiplayerScreen> {
 
   @override
   Widget build(BuildContext context) {
-    print(
-        'Build: gameStarted=$gameStarted, isReady=$isPlayerReady, opponent ready=$isOpponentReady');
-
     return Scaffold(
       body: Container(
         width: double.infinity,
@@ -610,7 +560,7 @@ class MultiplayerScreenState extends State<MultiplayerScreen> {
                 }
               },
               onRestart: _restartGame,
-              showOpponentColors: true, // Make sure to show opponent colors
+              showOpponentColors: true,
             ),
           ),
         ConfettiWidget(
@@ -692,7 +642,7 @@ class MultiplayerScreenState extends State<MultiplayerScreen> {
                   ElevatedButton(
                     onPressed: () {
                       Navigator.pop(context);
-                      _restartGame();
+                      _resetGameInRoom();
                     },
                     style: ElevatedButton.styleFrom(
                       backgroundColor: Colors.white,
@@ -711,7 +661,7 @@ class MultiplayerScreenState extends State<MultiplayerScreen> {
                   ElevatedButton(
                     onPressed: () {
                       Navigator.pop(context);
-                      Navigator.pop(context);
+                      _restartGame();
                     },
                     style: ElevatedButton.styleFrom(
                       backgroundColor: Colors.white,
@@ -734,5 +684,36 @@ class MultiplayerScreenState extends State<MultiplayerScreen> {
         ),
       ),
     );
+  }
+
+  Future<void> _resetGameInRoom() async {
+    try {
+      final roomRef = _database.child('rooms').child(roomId);
+
+      final player1GameState = GameState.initial();
+      final player2GameState = GameState.initial();
+
+      await roomRef
+          .child('players')
+          .child('0')
+          .child('gameState')
+          .set(player1GameState.toJson());
+      await roomRef
+          .child('players')
+          .child('1')
+          .child('gameState')
+          .set(player2GameState.toJson());
+
+      await roomRef
+          .update({'status': 'playing', 'currentTurn': 0, 'lastMove': null});
+
+      setState(() {
+        gameState = playerIndex == 0 ? player1GameState : player2GameState;
+        isMyTurn = playerIndex == 0;
+        gameStarted = true;
+      });
+    } catch (e) {
+      _showErrorSnackBar('Error starting new game');
+    }
   }
 }

@@ -37,7 +37,12 @@ class SinglePlayerScreenState extends State<SinglePlayerScreen> {
           Container(
             decoration: BoxDecoration(
               gradient: LinearGradient(
-                colors: [Colors.purple.shade100, Colors.purple.shade400],
+                colors: [
+                  // Colors.purple.shade100,
+                  // Colors.purple.shade400,
+                  Color.fromRGBO(156, 39, 176, 0.7),
+                  Color.fromRGBO(123, 31, 162, 0.9),
+                ],
                 begin: Alignment.topCenter,
                 end: Alignment.bottomCenter,
               ),

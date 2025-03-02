@@ -89,11 +89,9 @@ class BingoBoard extends StatelessWidget {
             child: Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                _buildColorDot(playerIndex == 0 ? Colors.green : Colors.orange,
-                    "Your selections"),
+                _buildColorDot(Colors.green, "Your selections"),
                 SizedBox(width: 12),
-                _buildColorDot(playerIndex == 0 ? Colors.orange : Colors.green,
-                    "Opponent's selections"),
+                _buildColorDot(Colors.red, "Opponent's selections"),
               ],
             ),
           ),
@@ -148,21 +146,22 @@ class BingoBoard extends StatelessWidget {
   }
 
   Widget _buildBingoCell(int number, bool isMarked, int index) {
-    // Get the color based on who selected it
     Color cellColor = Colors.transparent;
-    if (isMarked) {
-      // For multiplayer, check which player selected this number
-      if (showOpponentColors &&
-          gameState.playerSelections.containsKey(number)) {
-        int playerWhoSelected = gameState.playerSelections[number] ?? -1;
-
-        // Always use green for player 0 and orange for player 1 in multiplayer
-        cellColor = playerWhoSelected == 0 ? Colors.green : Colors.orange;
+    if (isMarked && showOpponentColors && playerIndex != null) {
+      // Determine who marked this number (using playerSelections)
+      int? markedByPlayer = gameState.playerSelections[number];
+      if (markedByPlayer != null) {
+        cellColor = markedByPlayer == playerIndex ? Colors.green : Colors.red;
       } else {
-        // Default color (single player or AI mode)
+        // If no player is specified (shouldn’t happen), default to transparent or green for debugging
+        debugPrint('No player found for marked number $number');
         cellColor =
-            gameState.isAiSelection[number] == true ? Colors.red : Colors.green;
+            Colors.green; // Fallback, but this should not occur in multiplayer
       }
+    }
+    else if (isMarked) {
+      // Default color for single-player or non-opponent view (optional)
+      cellColor = Colors.green; // You can adjust this for single-player mode
     }
 
     return GestureDetector(

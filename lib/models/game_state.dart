@@ -131,18 +131,21 @@ class GameState {
     );
   }
 
-  bool markNumber(int number, {bool isAi = false, int playerIndex = -1}) {
+bool markNumber(int number, {bool isAi = false, int playerIndex = -1}) {
   if (selectedNumbers.contains(number)) return false;
-
+  
   for (int row = 0; row < 5; row++) {
     for (int col = 0; col < 5; col++) {
       if (board[row][col] == number) {
         int index = row * 5 + col;
         marked[index] = true;
         isAiSelection[number] = isAi;
+        
+        // Always update playerSelections if a valid playerIndex is provided
         if (playerIndex >= 0) {
-          playerSelections[number] = playerIndex; 
+          playerSelections[number] = playerIndex;
         }
+        
         selectedNumbers.add(number);
         updateBingoStatus();
         return true;

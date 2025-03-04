@@ -155,13 +155,15 @@ class BingoBoard extends StatelessWidget {
       } else {
         // If no player is specified (shouldn’t happen), default to transparent or green for debugging
         debugPrint('No player found for marked number $number');
-        cellColor =
-            Colors.green; // Fallback, but this should not occur in multiplayer
+        // cellColor =
+        Colors.green; // Fallback, but this should not occur in multiplayer
+        // cellColor = playerIndex == 0 ? Colors.green : Colors.orange;
       }
-    }
-    else if (isMarked) {
+    } else if (isMarked) {
       // Default color for single-player or non-opponent view (optional)
-      cellColor = Colors.green; // You can adjust this for single-player mode
+      // cellColor = Colors.green; // You can adjust this for single-player mode
+      cellColor =
+          gameState.isAiSelection[number] == true ? Colors.red : Colors.green;
     }
 
     return GestureDetector(

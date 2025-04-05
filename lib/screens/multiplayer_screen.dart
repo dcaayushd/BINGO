@@ -124,8 +124,9 @@ class MultiplayerScreenState extends State<MultiplayerScreen> {
 
       Map<String, dynamic> players = _safelyConvertData(playersData);
 
-      if (playerIndex < 0 || !players.containsKey(playerIndex.toString()))
+      if (playerIndex < 0 || !players.containsKey(playerIndex.toString())) {
         return;
+      }
 
       setState(() {
         final playerData = players[playerIndex.toString()];

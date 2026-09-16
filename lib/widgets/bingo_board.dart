@@ -1,200 +1,201 @@
 import 'package:flutter/material.dart';
+
 import '../models/game_state.dart';
 
 class BingoBoard extends StatelessWidget {
-  final GameState gameState;
-  final Function(int) onNumberSelected;
-  final VoidCallback onRestart;
-  final bool showOpponentColors;
-  final int? playerIndex;
-
   const BingoBoard({
     super.key,
     required this.gameState,
     required this.onNumberSelected,
-    required this.onRestart,
-    this.showOpponentColors = false,
+    this.enabled = true,
     this.playerIndex,
+    this.showOpponentColors = false,
   });
+
+  final GameState gameState;
+  final ValueChanged<int> onNumberSelected;
+  final bool enabled;
+  final int? playerIndex;
+  final bool showOpponentColors;
 
   @override
   Widget build(BuildContext context) {
     return Column(
-      mainAxisAlignment: MainAxisAlignment.center,
+      mainAxisSize: MainAxisSize.min,
       children: [
-        // BINGO Text and indicator
-        Container(
-          margin: EdgeInsets.only(bottom: 16),
-          child: Row(
+        _BingoProgress(lineCount: gameState.lineCount),
+        const SizedBox(height: 14),
+        LayoutBuilder(
+          builder: (context, constraints) {
+            // Reserve the container and inter-cell gutters, so the grid fills
+            // its available width while retaining a comfortable screen edge.
+            final cellSize =
+                ((constraints.maxWidth - 46) / 5).clamp(46.0, 74.0);
+            return Container(
+              width: constraints.maxWidth,
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: 0.10),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  for (var row = 0; row < 5; row++)
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        for (var column = 0; column < 5; column++)
+                          _BingoCell(
+                            number: gameState.board[row][column],
+                            size: cellSize,
+                            marked: gameState.marked[row * 5 + column],
+                            enabled: enabled,
+                            color: _cellColor(gameState.board[row][column]),
+                            onTap: onNumberSelected,
+                          ),
+                      ],
+                    ),
+                ],
+              ),
+            );
+          },
+        ),
+        if (showOpponentColors) ...[
+          const SizedBox(height: 14),
+          const Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              for (int i = 0; i < 5; i++)
-                Container(
-                  margin: EdgeInsets.symmetric(horizontal: 4),
-                  width: 40,
-                  height: 40,
-                  decoration: BoxDecoration(
-                    color: gameState.bingoStatus.length > i
-                        ? Colors.green
-                        : Colors.white.withOpacity(0.2),
-                    borderRadius: BorderRadius.circular(5),
-                  ),
-                  child: Center(
-                    child: Text(
-                      "BINGO"[i],
-                      style: TextStyle(
-                        fontSize: 24,
-                        fontWeight: FontWeight.bold,
-                        color: gameState.bingoStatus.length > i
-                            ? Colors.white
-                            : Colors.white.withOpacity(0.7),
-                      ),
-                    ),
-                  ),
-                ),
+              _Legend(color: Colors.green, label: 'Your selections'),
+              SizedBox(width: 16),
+              _Legend(color: Colors.red, label: "Opponent's selections"),
             ],
           ),
-        ),
+        ],
+      ],
+    );
+  }
 
-        // Bingo board
-        Container(
-          decoration: BoxDecoration(
-            color: Colors.white.withOpacity(0.1),
-            borderRadius: BorderRadius.circular(12),
-          ),
-          padding: EdgeInsets.all(8),
-          child: Column(
-            children: [
-              for (int row = 0; row < 5; row++)
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    for (int col = 0; col < 5; col++)
-                      _buildBingoCell(
-                        gameState.board[row][col],
-                        gameState.selectedNumbers
-                            .contains(gameState.board[row][col]),
-                        row * 5 + col,
-                      ),
-                  ],
+  Color _cellColor(int number) {
+    final owner = gameState.playerSelections[number];
+    if (owner == null || playerIndex == null) {
+      return gameState.playerSelections[number] == 1
+          ? Colors.red
+          : Colors.green;
+    }
+    return owner == playerIndex ? Colors.green : Colors.red;
+  }
+}
+
+class _BingoProgress extends StatelessWidget {
+  const _BingoProgress({required this.lineCount});
+
+  final int lineCount;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            for (var index = 0; index < 5; index++)
+              Container(
+                width: 40,
+                height: 40,
+                margin: const EdgeInsets.symmetric(horizontal: 3),
+                decoration: BoxDecoration(
+                  color: lineCount > index
+                      ? Colors.green
+                      : Colors.white.withValues(alpha: 0.20),
+                  borderRadius: BorderRadius.circular(6),
                 ),
-            ],
-          ),
-        ),
-
-        // Legend for colors
-        if (showOpponentColors)
-          Padding(
-            padding: const EdgeInsets.only(top: 16.0),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                _buildColorDot(Colors.green, "Your selections"),
-                SizedBox(width: 12),
-                _buildColorDot(Colors.red, "Opponent's selections"),
-              ],
-            ),
-          ),
-
-        // Restart button
-        Container(
-          margin: EdgeInsets.only(top: 20),
-          child: ElevatedButton(
-            onPressed: onRestart,
-            style: ElevatedButton.styleFrom(
-              padding: EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-              backgroundColor: Colors.white,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(8),
+                alignment: Alignment.center,
+                child: Text(
+                  'BINGO'[index],
+                  style: TextStyle(
+                    color: Colors.white
+                        .withValues(alpha: lineCount > index ? 1 : .70),
+                    fontSize: 22,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
               ),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
+class _BingoCell extends StatelessWidget {
+  const _BingoCell({
+    required this.number,
+    required this.size,
+    required this.marked,
+    required this.enabled,
+    required this.color,
+    required this.onTap,
+  });
+
+  final int number;
+  final double size;
+  final bool marked;
+  final bool enabled;
+  final Color color;
+  final ValueChanged<int> onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.all(3),
+      child: Material(
+        color: marked ? color : Colors.white.withValues(alpha: 0.20),
+        borderRadius: BorderRadius.circular(8),
+        child: InkWell(
+          onTap: enabled && !marked ? () => onTap(number) : null,
+          borderRadius: BorderRadius.circular(8),
+          child: Container(
+            width: size,
+            height: size,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: Colors.white.withValues(alpha: .30)),
             ),
             child: Text(
-              "Exit Game",
+              '$number',
               style: TextStyle(
-                fontSize: 16,
-                color: Colors.purple,
-                fontWeight: FontWeight.bold,
+                color: Colors.white.withValues(alpha: marked ? 1 : .90),
+                fontSize: size >= 52 ? 23 : 19,
+                fontWeight: FontWeight.w700,
               ),
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildColorDot(Color color, String label) {
-    return Row(
-      children: [
-        Container(
-          width: 15,
-          height: 15,
-          decoration: BoxDecoration(
-            color: color,
-            shape: BoxShape.circle,
-          ),
-        ),
-        SizedBox(width: 5),
-        Text(
-          label,
-          style: TextStyle(
-            color: Colors.white,
-            fontSize: 14,
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildBingoCell(int number, bool isMarked, int index) {
-    Color cellColor = Colors.transparent;
-    if (isMarked && showOpponentColors && playerIndex != null) {
-      // Determine who marked this number (using playerSelections)
-      int? markedByPlayer = gameState.playerSelections[number];
-      if (markedByPlayer != null) {
-        cellColor = markedByPlayer == playerIndex ? Colors.green : Colors.red;
-      } else {
-        // If no player is specified (shouldn’t happen), default to transparent or green for debugging
-        debugPrint('No player found for marked number $number');
-        // cellColor =
-        Colors.green; // Fallback, but this should not occur in multiplayer
-        // cellColor = playerIndex == 0 ? Colors.green : Colors.orange;
-      }
-    } else if (isMarked) {
-      // Default color for single-player or non-opponent view (optional)
-      // cellColor = Colors.green; // You can adjust this for single-player mode
-      cellColor =
-          gameState.isAiSelection[number] == true ? Colors.red : Colors.green;
-    }
-
-    return GestureDetector(
-      onTap: () {
-        if (!isMarked) {
-          onNumberSelected(number);
-        }
-      },
-      child: Container(
-        width: 60,
-        height: 60,
-        margin: EdgeInsets.all(4),
-        decoration: BoxDecoration(
-          color: isMarked ? cellColor : Colors.white.withOpacity(0.2),
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(
-            color: Colors.white.withOpacity(0.3),
-            width: 1,
-          ),
-        ),
-        child: Center(
-          child: Text(
-            number.toString(),
-            style: TextStyle(
-              fontSize: 24,
-              fontWeight: FontWeight.bold,
-              color: isMarked ? Colors.white : Colors.white.withOpacity(0.9),
             ),
           ),
         ),
       ),
+    );
+  }
+}
+
+class _Legend extends StatelessWidget {
+  const _Legend({required this.color, required this.label});
+
+  final Color color;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+            width: 12,
+            height: 12,
+            decoration: BoxDecoration(color: color, shape: BoxShape.circle)),
+        const SizedBox(width: 5),
+        Text(label, style: const TextStyle(color: Colors.white, fontSize: 12)),
+      ],
     );
   }
 }

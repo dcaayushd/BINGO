@@ -1,720 +1,936 @@
-import 'package:flutter/material.dart';
-import 'package:confetti/confetti.dart';
-import 'package:shared_preferences/shared_preferences.dart';
-import 'package:firebase_database/firebase_database.dart';
 import 'dart:async';
-import '../models/game_state.dart';
+
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+
+import '../config/game_server_config.dart';
+import '../models/online_room.dart';
+import '../models/player_profile.dart';
+import '../services/audio_service.dart';
 import '../services/game_service.dart';
+import '../services/profile_service.dart';
+import '../theme/app_theme.dart';
+import '../widgets/app_feedback.dart';
 import '../widgets/bingo_board.dart';
+import '../widgets/confetti_overlay.dart';
 
 class MultiplayerScreen extends StatefulWidget {
-  const MultiplayerScreen({super.key});
+  const MultiplayerScreen({super.key, required this.profile});
+
+  final PlayerProfile profile;
 
   @override
-  MultiplayerScreenState createState() => MultiplayerScreenState();
+  State<MultiplayerScreen> createState() => _MultiplayerScreenState();
 }
 
-class MultiplayerScreenState extends State<MultiplayerScreen> {
-  final GameService gameService = GameService();
-  final DatabaseReference _database = FirebaseDatabase.instance.ref();
-  String roomId = "";
-  String playerName = "";
-  TextEditingController nameController = TextEditingController();
-  TextEditingController roomController = TextEditingController();
-  int playerIndex = -1;
-  StreamSubscription? _roomSubscription;
-  late ConfettiController _confettiController;
-  GameState? gameState;
-  String? opponentName;
-  bool isMyTurn = false;
-  bool gameStarted = false;
-  bool isLoading = false;
-  bool isPlayerReady = false;
-  bool isOpponentReady = false;
-  bool opponentJoined = false;
-  String notificationMessage = "";
+class _MultiplayerScreenState extends State<MultiplayerScreen> {
+  final _gameService = GameService();
+  final _roomController = TextEditingController();
+  StreamSubscription<Map<String, dynamic>>? _roomSubscription;
+  StreamSubscription<Map<String, dynamic>>? _roomClosedSubscription;
+  late PlayerProfile _profile;
+  OnlineRoom? _room;
+  String? _roomId;
+  int? _playerIndex;
+  bool _loading = false;
+  bool _movePending = false;
+  bool _isLeaving = false;
+  bool _resultDialogOpen = false;
+  bool _closeQueued = false;
+  bool _showConfetti = false;
+  int? _presentedRound;
+  int? _recordedRound;
 
   @override
   void initState() {
     super.initState();
-    _confettiController = ConfettiController(duration: Duration(seconds: 3));
-    _loadName();
+    _profile = widget.profile;
+    _roomSubscription = _gameService.roomUpdates.listen(_onRoomUpdate);
+    _roomClosedSubscription = _gameService.roomClosed.listen(_onRoomClosed);
   }
 
   @override
   void dispose() {
     _roomSubscription?.cancel();
-    _confettiController.dispose();
-    nameController.dispose();
-    roomController.dispose();
-    if (roomId.isNotEmpty) {
-      gameService.leaveRoom(roomId, playerIndex);
-    }
+    _roomClosedSubscription?.cancel();
+    _roomController.dispose();
+    _gameService.dispose();
     super.dispose();
   }
 
-  Future<void> _loadName() async {
-    final prefs = await SharedPreferences.getInstance();
+  void _onRoomUpdate(Map<String, dynamic> data) {
+    final room = OnlineRoom.fromJson(data);
+    if (_roomId == null || room.id != _roomId || !mounted) return;
+    final wasMyTurn =
+        _room?.isPlaying == true && _room?.currentTurn == _playerIndex;
+    final wasPaused = _room?.isPaused == true;
+    final roundStarted =
+        room.isPlaying && !wasMyTurn && !wasPaused && _room?.isPlaying != true;
+    final isMyTurn = room.isPlaying && room.currentTurn == _playerIndex;
+    final isNewRoundResult = room.isFinished && _presentedRound != room.round;
     setState(() {
-      playerName = prefs.getString('playerName') ?? "";
-      nameController.text = playerName;
+      _room = room;
+      _movePending = false;
+      _showConfetti = isNewRoundResult && room.winner == _playerIndex;
+      if (!room.isFinished) _showConfetti = false;
     });
-  }
-
-  Future<void> _saveName(String name) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('playerName', name);
-  }
-
-  Map<String, dynamic> _safelyConvertData(dynamic data) {
-    if (data == null) return {};
-
-    if (data is Map) {
-      final Map<String, dynamic> result = {};
-
-      data.forEach((key, value) {
-        final String stringKey = key.toString();
-
-        if (value is Map) {
-          result[stringKey] = _safelyConvertData(value);
-        } else if (value is List) {
-          // Handle lists properly
-          if (stringKey == 'players') {
-            // Convert player list to map with string keys
-            Map<String, dynamic> convertedPlayers = {};
-            for (int i = 0; i < value.length; i++) {
-              if (value[i] != null) {
-                convertedPlayers[i.toString()] = _safelyConvertData(value[i]);
-              }
-            }
-            result[stringKey] = convertedPlayers;
-          } else if (stringKey == 'selectedNumbers') {
-            // Keep selected numbers as a list
-            result[stringKey] = value.where((item) => item != null).toList();
-          } else {
-            // For other lists
-            result[stringKey] = value.map((item) {
-              if (item is Map) {
-                return _safelyConvertData(item);
-              }
-              return item;
-            }).toList();
-          }
-        } else {
-          result[stringKey] = value;
-        }
-      });
-
-      return result;
-    }
-
-    return {};
-  }
-
-  void _handleRoomUpdate(Map<Object?, Object?> rawRoomData) {
-    try {
-      if (rawRoomData.isEmpty) return;
-
-      final roomData = _safelyConvertData(rawRoomData);
-      final status = roomData['status'] as String? ?? 'waiting';
-      final currentTurn = roomData['currentTurn'] as int? ?? 0;
-
-      final playersData = roomData['players'];
-      if (playersData == null) return;
-
-      Map<String, dynamic> players = _safelyConvertData(playersData);
-
-      if (playerIndex < 0 || !players.containsKey(playerIndex.toString())) {
-        return;
-      }
-
-      setState(() {
-        final playerData = players[playerIndex.toString()];
-        GameState? updatedGameState;
-
-        if (playerData != null && playerData is Map) {
-          final gameStateData = playerData['gameState'];
-          if (gameStateData != null && gameStateData is Map) {
-            updatedGameState =
-                GameState.fromJson(_safelyConvertData(gameStateData));
-          }
-          isPlayerReady = playerData['isReady'] == true;
-        }
-
-        final opponentIndex = playerIndex == 0 ? '1' : '0';
-        final wasOpponentJoined = opponentJoined;
-        opponentJoined = players.containsKey(opponentIndex);
-
-        if (opponentJoined) {
-          final opponentData = players[opponentIndex];
-          if (opponentData != null && opponentData is Map) {
-            final newOpponentName =
-                opponentData['name'] as String? ?? "Opponent";
-
-            if (!wasOpponentJoined) {
-              notificationMessage = "$newOpponentName has joined the room!";
-              Future.delayed(Duration(seconds: 3), () {
-                if (mounted) {
-                  setState(() {
-                    notificationMessage = "";
-                  });
-                }
-              });
-            }
-
-            opponentName = newOpponentName;
-            isOpponentReady = opponentData['isReady'] == true;
-          }
-        }
-
-        isMyTurn = currentTurn == playerIndex;
-        gameStarted = (status == 'playing' && opponentJoined);
-
-        if (updatedGameState != null) {
-          // updatedGameState.playerSelections = gameState?.playerSelections ?? {};
-          updatedGameState.marked = gameState?.marked ?? List.filled(25, false);
-          gameState = updatedGameState;
-        }
-
-        if (isPlayerReady &&
-            isOpponentReady &&
-            opponentJoined &&
-            status == 'waiting') {
-          _database.child('rooms').child(roomId).update({
-            'status': 'playing',
-            'currentTurn': 0,
-          });
-        }
-
-        if (gameState?.bingoStatus == "BINGO") {
-          _showWinDialog("You won!", isPlayerWin: true);
-        }
-      });
-    } catch (e) {
-      print('Error handling room update: $e');
+    if (roundStarted) unawaited(AudioService().playGameStart());
+    if (isMyTurn && !wasMyTurn && !roundStarted) _notifyPlayerTurn();
+    if (isNewRoundResult) {
+      _presentedRound = room.round;
+      unawaited(_showRoundResult(room));
     }
   }
 
-  void _startListeningToRoom() {
-    _roomSubscription = gameService.getRoomStream(roomId).listen((roomData) {
-      if (roomData.isNotEmpty) {
-        _handleRoomUpdate(roomData.cast<Object?, Object?>());
-      }
-    });
+  void _onRoomClosed(Map<String, dynamic> event) {
+    if (!mounted || _isLeaving || _roomId == null) return;
+    final isPlayerDeparture = event['type'] == 'player_left';
+    final name = event['playerName']?.toString().trim();
+    final eventReason = event['reason']?.toString().trim();
+    final reason = eventReason?.isNotEmpty == true
+        ? eventReason!
+        : isPlayerDeparture && name?.isNotEmpty == true
+            ? '$name left the game.'
+            : 'The room was closed.';
+    _isLeaving = true;
+    unawaited(_exitAfterRoomClosed(
+      reason,
+      showBeforeLeaving: isPlayerDeparture,
+    ));
+  }
+
+  Future<void> _exitAfterRoomClosed(
+    String reason, {
+    required bool showBeforeLeaving,
+  }) async {
+    if (_closeQueued) return;
+    _closeQueued = true;
+    // A room can close while its non-dismissible result dialog is open. Close
+    // that route first, then pop this screen in the next event-loop turn.
+    if (_resultDialogOpen && mounted) {
+      Navigator.of(context, rootNavigator: true).pop(false);
+      await Future<void>.delayed(Duration.zero);
+    }
+    if (mounted) showAppToast(context, reason);
+    // Let the remaining player read a named departure before returning home.
+    if (showBeforeLeaving) {
+      await Future<void>.delayed(const Duration(milliseconds: 1800));
+    }
+    if (mounted) Navigator.of(context).pop(_profile);
   }
 
   Future<void> _createRoom() async {
-    setState(() => isLoading = true);
+    setState(() => _loading = true);
+    RoomJoin? join;
     try {
-      final newRoomId = await gameService.createRoom(playerName);
+      final createdRoom = await _gameService.createRoom(_profile.displayName);
+      join = createdRoom;
+      if (!mounted) return;
       setState(() {
-        roomId = newRoomId;
-        playerIndex = 0;
-        _startListeningToRoom();
+        _roomId = createdRoom.roomId;
+        _playerIndex = createdRoom.playerIndex;
       });
-    } catch (e) {
-      _showErrorSnackBar('Error creating room');
+      await _gameService.subscribe(createdRoom.roomId);
+      if (!mounted) return;
+    } catch (error) {
+      if (join != null) {
+        unawaited(_gameService.leaveRoom(join.roomId));
+        if (mounted) {
+          setState(() {
+            _roomId = null;
+            _playerIndex = null;
+          });
+        }
+      }
+      _showMessage(_friendlyError(error));
     } finally {
-      setState(() => isLoading = false);
+      if (mounted) setState(() => _loading = false);
     }
   }
 
-  Future<void> _joinRoom(String roomId) async {
-    setState(() => isLoading = true);
+  Future<void> _joinRoom() async {
+    final roomId = _roomController.text.trim().toUpperCase();
+    if (!RegExp(r'^[A-F0-9]{6}$').hasMatch(roomId)) {
+      // The Join button is disabled until the code is complete. Keep this
+      // guard for keyboard submission and programmatic calls without showing
+      // a disruptive error banner.
+      return;
+    }
+    setState(() => _loading = true);
+    RoomJoin? join;
     try {
-      final success = await gameService.joinRoom(roomId.trim(), playerName);
-      if (success) {
-        setState(() {
-          this.roomId = roomId.trim();
-          playerIndex = 1;
-          _startListeningToRoom();
-        });
-      } else {
-        _showErrorSnackBar('Invalid Room ID or Room Full');
+      final joinedRoom =
+          await _gameService.joinRoom(roomId, _profile.displayName);
+      join = joinedRoom;
+      if (!mounted) return;
+      setState(() {
+        _roomId = joinedRoom.roomId;
+        _playerIndex = joinedRoom.playerIndex;
+      });
+      await _gameService.subscribe(joinedRoom.roomId);
+      if (!mounted) return;
+      unawaited(AudioService().playNotification());
+    } catch (error) {
+      if (join != null) {
+        unawaited(_gameService.leaveRoom(join.roomId));
+        if (mounted) {
+          setState(() {
+            _roomId = null;
+            _playerIndex = null;
+          });
+        }
       }
-    } catch (e) {
-      _showErrorSnackBar('Error joining room');
+      _showMessage(_friendlyError(error));
     } finally {
-      setState(() => isLoading = false);
+      if (mounted) setState(() => _loading = false);
     }
   }
 
-  Future<void> _toggleReadyStatus() async {
-    if (roomId.isEmpty || playerIndex < 0) return;
-
+  Future<void> _toggleReady() async {
+    final room = _room;
+    final index = _playerIndex;
+    if (room == null || index == null) return;
+    final player = room.playerAt(index);
+    if (player == null) return;
+    setState(() => _loading = true);
     try {
-      final roomRef = _database.child('rooms').child(roomId);
-      final playerRef = roomRef.child('players').child(playerIndex.toString());
-
-      setState(() {
-        isPlayerReady = !isPlayerReady;
-      });
-
-      await playerRef.update({
-        'isReady': isPlayerReady,
-      });
-
-      if (isPlayerReady && isOpponentReady && opponentJoined) {
-        await roomRef.update({
-          'status': 'playing',
-          'currentTurn': 0,
-        });
-      }
-    } catch (e) {
-      _showErrorSnackBar('Error updating ready status');
-      setState(() {
-        isPlayerReady = !isPlayerReady;
-      });
+      await _gameService.setReady(room.id, !player.isReady);
+      unawaited(AudioService().playButtonClick());
+    } catch (error) {
+      _showMessage(_friendlyError(error));
+    } finally {
+      if (mounted) setState(() => _loading = false);
     }
   }
 
-  void _showErrorSnackBar(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        backgroundColor: Colors.red.shade400,
-      ),
-    );
+  Future<void> _makeMove(int number) async {
+    final room = _room;
+    if (room == null ||
+        _movePending ||
+        room.currentTurn != _playerIndex ||
+        !room.isPlaying) {
+      return;
+    }
+    setState(() => _movePending = true);
+    unawaited(AudioService().playCellSelect());
+    try {
+      await _gameService.makeMove(room.id, number);
+    } catch (error) {
+      if (mounted) setState(() => _movePending = false);
+      _showMessage(_friendlyError(error));
+    }
   }
 
-  void _restartGame() {
-    setState(() {
-      if (roomId.isNotEmpty) {
-        gameService.leaveRoom(roomId, playerIndex);
+  Future<void> _showRoundResult(OnlineRoom room) async {
+    final index = _playerIndex;
+    if (index == null || !mounted) return;
+    final won = room.winner == index;
+    if (_recordedRound != room.round) {
+      _recordedRound = room.round;
+      _profile = await ProfileService.instance
+          .recordMultiplayerResult(_profile, won: won);
+    }
+    if (!mounted || _isLeaving) return;
+    unawaited(won
+        ? AudioService().playWinSound()
+        : AudioService().playNotification());
+    final opponent = room.playerAt(index == 0 ? 1 : 0);
+    final myScore = room.playerAt(index)?.score ?? 0;
+    final opponentScore = opponent?.score ?? 0;
+    bool? requestRematch;
+    _resultDialogOpen = true;
+    try {
+      requestRematch = await showAppChoiceDialog<bool>(
+        context,
+        barrierDismissible: false,
+        title: Text(won
+            ? 'You won the round'
+            : '${opponent?.name ?? 'Opponent'} won the round'),
+        content: Text('$myScore–$opponentScore match score'),
+        actions: const [
+          AppDialogAction(label: 'Leave', value: false),
+          AppDialogAction(label: 'Rematch', value: true, isDefault: true),
+        ],
+      );
+    } finally {
+      _resultDialogOpen = false;
+    }
+    if (!mounted || _isLeaving) return;
+    if (requestRematch == true) {
+      try {
+        await _gameService.requestRematch(room.id);
+      } catch (error) {
+        _showMessage(_friendlyError(error));
       }
-      roomId = "";
-      playerIndex = -1;
-      gameState = null;
-      opponentName = null;
-      isMyTurn = false;
-      gameStarted = false;
-      isPlayerReady = false;
-      isOpponentReady = false;
-      opponentJoined = false;
-      notificationMessage = "";
-      _roomSubscription?.cancel();
-    });
+    } else {
+      await _leaveGame();
+    }
+  }
+
+  Future<void> _copyRoomCode() async {
+    final roomId = _roomId;
+    if (roomId == null) return;
+    await Clipboard.setData(ClipboardData(text: roomId));
+    if (mounted) _showMessage('Room code copied');
+  }
+
+  Future<void> _leaveGame() async {
+    if (_isLeaving) return;
+    _isLeaving = true;
+    final roomId = _roomId;
+    if (roomId != null) {
+      try {
+        await _gameService.leaveRoom(roomId);
+      } catch (_) {
+        // The remote connection may already be gone; close the local screen.
+      }
+    }
+    if (mounted) Navigator.pop(context, _profile);
+  }
+
+  void _onPopInvoked(bool didPop, Object? result) {
+    if (!didPop) unawaited(_leaveGame());
+  }
+
+  String _friendlyError(Object error) => error is GameServerUnavailableException
+      ? error.message
+      : error
+          .toString()
+          .replaceFirst('Exception: ', '')
+          .replaceFirst('SocketException: ', '');
+
+  void _notifyPlayerTurn() {
+    HapticFeedback.mediumImpact();
+    unawaited(AudioService().playTurnSound());
+  }
+
+  void _showMessage(String message) {
+    if (!mounted) return;
+    showAppToast(context, message);
+  }
+
+  bool get _hasCompleteRoomCode => RegExp(r'^[A-F0-9]{6}$')
+      .hasMatch(_roomController.text.trim().toUpperCase());
+
+  void _onRoomCodeChanged(String _) {
+    // Rebuild only to update the enabled state of the Join control. The field
+    // itself stays focused and does not show a validation error while typing.
+    setState(() {});
   }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      body: Container(
-        width: double.infinity,
-        height: double.infinity,
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            colors: [
-              Color.fromRGBO(156, 39, 176, 0.7),
-              Color.fromRGBO(123, 31, 162, 0.9),
-            ],
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-          ),
+    final room = _room;
+    final view = _loading
+        ? const Center(child: CircularProgressIndicator(color: Colors.white))
+        : room == null
+            ? _buildRoomSetup()
+            : room.isWaiting
+                ? _buildLobby(room)
+                : _buildGame(room);
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: _onPopInvoked,
+      child: Scaffold(
+        backgroundColor:
+            AppColors.screenBottomColorFor(Theme.of(context).brightness),
+        extendBodyBehindAppBar: true,
+        appBar: AppBar(
+          backgroundColor: Colors.transparent,
+          foregroundColor: Colors.white,
+          elevation: 0,
+          scrolledUnderElevation: 0,
+          title: const Text('Play with Friends',
+              style: TextStyle(fontWeight: FontWeight.w700)),
         ),
-        child: SafeArea(
-          child: SingleChildScrollView(
-            child: Padding(
-              padding: const EdgeInsets.symmetric(vertical: 16.0),
+        body: Stack(
+          children: [
+            Positioned.fill(
+              child: Container(
+                decoration: BoxDecoration(
+                    gradient: AppColors.screenGradientFor(
+                        Theme.of(context).brightness)),
+                child: SafeArea(
+                  child: Center(
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 440),
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(20, 24, 20, 28),
+                        child: AnimatedSwitcher(
+                          duration: const Duration(milliseconds: 180),
+                          switchInCurve: Curves.easeOutCubic,
+                          switchOutCurve: Curves.easeIn,
+                          transitionBuilder: (child, animation) =>
+                              FadeTransition(
+                            opacity: animation,
+                            child: SlideTransition(
+                              position: Tween<Offset>(
+                                      begin: const Offset(0, .02),
+                                      end: Offset.zero)
+                                  .animate(animation),
+                              child: child,
+                            ),
+                          ),
+                          child: KeyedSubtree(
+                            key: ValueKey(
+                                '${room?.id}-${room?.status}-${_loading ? 'loading' : 'view'}'),
+                            child: view,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            Positioned.fill(child: ConfettiOverlay(active: _showConfetti)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildRoomSetup() {
+    if (!GameServerConfig.isConfigured) {
+      return _buildMultiplayerUnavailable();
+    }
+    final canJoin = _hasCompleteRoomCode;
+    final mutedText = Theme.of(context).colorScheme.onSurfaceVariant;
+    return SingleChildScrollView(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text('Playing as ${_profile.displayName}',
+              textAlign: TextAlign.center,
+              style: const TextStyle(color: Colors.white70)),
+          const SizedBox(height: 32),
+          _Panel(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                const Text('Create a room',
+                    style:
+                        TextStyle(fontSize: 20, fontWeight: FontWeight.w700)),
+                const SizedBox(height: 6),
+                const Text(
+                    'Share the room code, then both players confirm they are ready.'),
+                const SizedBox(height: 20),
+                SizedBox(
+                  height: 64,
+                  child: FilledButton.icon(
+                    onPressed: _createRoom,
+                    icon: const Icon(Icons.add),
+                    label: const Text('Create room'),
+                    style: FilledButton.styleFrom(
+                      textStyle: const TextStyle(
+                        fontSize: 17,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 16),
+          _Panel(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                const Text('Join a room',
+                    style:
+                        TextStyle(fontSize: 20, fontWeight: FontWeight.w700)),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: _roomController,
+                  textCapitalization: TextCapitalization.characters,
+                  maxLength: 6,
+                  inputFormatters: [
+                    FilteringTextInputFormatter.allow(RegExp(r'[A-Fa-f0-9]')),
+                  ],
+                  autofillHints: const [AutofillHints.oneTimeCode],
+                  decoration: InputDecoration(
+                    labelText: 'Room code',
+                    hintText: 'ABC123',
+                    helperText: 'Six-character code shared by your friend',
+                    helperStyle: TextStyle(color: mutedText),
+                    border: const OutlineInputBorder(),
+                  ),
+                  onChanged: _onRoomCodeChanged,
+                  onSubmitted: canJoin ? (_) => _joinRoom() : null,
+                ),
+                const SizedBox(height: 14),
+                SizedBox(
+                  height: 64,
+                  child: FilledButton.tonalIcon(
+                    onPressed: canJoin ? _joinRoom : null,
+                    icon: const Icon(Icons.login),
+                    label: const Text('Join room'),
+                    style: FilledButton.styleFrom(
+                      textStyle: const TextStyle(
+                        fontSize: 17,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 16),
+          Text(
+            'Server ready — create a private room or join a friend.',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+                color: Colors.white.withValues(alpha: .72), fontSize: 12),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMultiplayerUnavailable() => SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text('Playing as ${_profile.displayName}',
+                textAlign: TextAlign.center,
+                style: const TextStyle(color: Colors.white70)),
+            const SizedBox(height: 32),
+            _Panel(
               child: Column(
                 children: [
-                  if (isLoading)
-                    Center(
-                      child: CircularProgressIndicator(
+                  Container(
+                    width: 56,
+                    height: 56,
+                    decoration: BoxDecoration(
+                      color: Theme.of(context).colorScheme.primaryContainer,
+                      borderRadius: BorderRadius.circular(18),
+                    ),
+                    child: Icon(
+                      Icons.cloud_off_outlined,
+                      color: Theme.of(context).colorScheme.onPrimaryContainer,
+                      size: 28,
+                    ),
+                  ),
+                  const SizedBox(height: 18),
+                  const Text(
+                    'Multiplayer is not available yet',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'This copy of Bingo was installed without a game server.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    'Ask the app host to enable multiplayer, then reopen the app.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      );
+
+  Widget _buildLobby(OnlineRoom room) {
+    final index = _playerIndex!;
+    final player = room.playerAt(index)!;
+    final opponent = room.playerAt(index == 0 ? 1 : 0);
+    final opponentIsReady = opponent?.isReady == true;
+    final hasOpponent = opponent != null;
+    final readyMessage = !hasOpponent
+        ? 'Share the code above so a friend can join.'
+        : player.isReady && opponentIsReady
+            ? 'Both players are ready. Starting the match…'
+            : player.isReady
+                ? 'You are ready. Waiting for ${opponent.name}.'
+                : opponentIsReady
+                    ? '${opponent.name} is ready. Confirm when you are set.'
+                    : 'Confirm when you are ready to start.';
+    return SingleChildScrollView(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const Text('Private match',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: Colors.white70)),
+          const SizedBox(height: 8),
+          const Text(
+            'Share this code with your friend',
+            textAlign: TextAlign.center,
+            style: TextStyle(color: Colors.white),
+          ),
+          const SizedBox(height: 14),
+          _RoomCodeCard(roomId: room.id, onCopy: _copyRoomCode),
+          const SizedBox(height: 22),
+          _Panel(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                const Row(
+                  children: [
+                    Icon(Icons.groups_rounded, size: 20),
+                    SizedBox(width: 8),
+                    Text('Match lobby',
+                        style: TextStyle(fontWeight: FontWeight.w700)),
+                  ],
+                ),
+                const SizedBox(height: 14),
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  decoration: BoxDecoration(
+                    color: Theme.of(context)
+                        .colorScheme
+                        .primaryContainer
+                        .withValues(alpha: .45),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: const Row(
+                    children: [
+                      Icon(Icons.grid_view_rounded, size: 18),
+                      SizedBox(width: 8),
+                      Text('Classic Bingo · first to 5 lines'),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 16),
+                _PlayerStatus(
+                    name: player.name,
+                    ready: player.isReady,
+                    connected: player.connected,
+                    isYou: true),
+                const Divider(height: 24),
+                if (opponent == null)
+                  const Text('Waiting for an opponent…')
+                else
+                  _PlayerStatus(
+                      name: opponent.name,
+                      ready: opponent.isReady,
+                      connected: opponent.connected),
+              ],
+            ),
+          ),
+          const SizedBox(height: 22),
+          SizedBox(
+            height: 68,
+            child: FilledButton.icon(
+              onPressed: hasOpponent ? _toggleReady : null,
+              icon: Icon(player.isReady
+                  ? Icons.check_circle_rounded
+                  : Icons.play_circle_fill_rounded),
+              label: Text(player.isReady
+                  ? 'Ready — tap to cancel'
+                  : 'I’m ready to play'),
+              style: FilledButton.styleFrom(
+                textStyle: const TextStyle(
+                  fontSize: 17,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
+          Text(
+            readyMessage,
+            textAlign: TextAlign.center,
+            style: TextStyle(color: Colors.white.withValues(alpha: .80)),
+          ),
+          const SizedBox(height: 32),
+          _buildLeaveGameButton(),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildGame(OnlineRoom room) {
+    final index = _playerIndex!;
+    final player = room.playerAt(index)!;
+    final opponent = room.playerAt(index == 0 ? 1 : 0);
+    final canMove =
+        room.isPlaying && room.currentTurn == index && !_movePending;
+    final status = room.isPaused
+        ? 'Connection paused — waiting for ${opponent?.name ?? 'opponent'} to return'
+        : room.isFinished
+            ? player.rematchRequested
+                ? 'Rematch requested — waiting for ${opponent?.name ?? 'opponent'}'
+                : 'Round complete'
+            : canMove
+                ? 'Your turn'
+                : "${opponent?.name ?? 'Opponent'}'s turn";
+    final statusColor = room.isPaused || room.isFinished
+        ? Colors.white70
+        : canMove
+            ? Colors.green
+            : Colors.red;
+    return SingleChildScrollView(
+      child: Column(
+        children: [
+          _MatchScore(room: room, playerIndex: index),
+          const SizedBox(height: 16),
+          AnimatedSwitcher(
+            duration: const Duration(milliseconds: 160),
+            child: Text(status,
+                key: ValueKey(status),
+                textAlign: TextAlign.center,
+                style:
+                    TextStyle(color: statusColor, fontWeight: FontWeight.w700)),
+          ),
+          const SizedBox(height: 14),
+          BingoBoard(
+              gameState: player.board,
+              playerIndex: index,
+              enabled: canMove,
+              showOpponentColors: true,
+              onNumberSelected: _makeMove),
+          const SizedBox(height: 14),
+          Text('Round ${room.round}',
+              style: TextStyle(color: Colors.white.withValues(alpha: .74))),
+          const SizedBox(height: 40),
+          _buildLeaveGameButton(),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildLeaveGameButton() => Align(
+        alignment: Alignment.center,
+        child: OutlinedButton.icon(
+          onPressed: _isLeaving ? null : _leaveGame,
+          style: OutlinedButton.styleFrom(foregroundColor: Colors.white),
+          icon: const Icon(Icons.exit_to_app),
+          label: const Text(
+            'Leave game',
+            style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
+          ),
+        ),
+      );
+}
+
+class _Panel extends StatelessWidget {
+  const _Panel({required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) => Container(
+        padding: const EdgeInsets.all(18),
+        decoration: BoxDecoration(
+            color: Theme.of(context).colorScheme.surface,
+            borderRadius: BorderRadius.circular(16)),
+        child: child,
+      );
+}
+
+class _PlayerStatus extends StatelessWidget {
+  const _PlayerStatus(
+      {required this.name,
+      required this.ready,
+      required this.connected,
+      this.isYou = false});
+
+  final String name;
+  final bool ready;
+  final bool connected;
+  final bool isYou;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final status = ready
+        ? 'Ready'
+        : connected
+            ? 'Not ready'
+            : 'Reconnecting';
+    final statusColor = ready
+        ? Colors.green.shade700
+        : connected
+            ? colorScheme.onSurfaceVariant
+            : AppColors.danger;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: isYou
+            ? colorScheme.primaryContainer.withValues(alpha: .28)
+            : colorScheme.surface,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        children: [
+          CircleAvatar(
+            radius: 18,
+            backgroundColor: statusColor.withValues(alpha: .14),
+            child: Icon(
+              connected ? Icons.person_rounded : Icons.person_off_outlined,
+              color: statusColor,
+              size: 20,
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(name, style: const TextStyle(fontWeight: FontWeight.w700)),
+                Text(
+                  isYou
+                      ? 'You'
+                      : connected
+                          ? 'Connected'
+                          : 'Reconnecting',
+                  style: TextStyle(
+                    color: colorScheme.onSurfaceVariant,
+                    fontSize: 12,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+            decoration: BoxDecoration(
+              color: statusColor.withValues(alpha: .12),
+              borderRadius: BorderRadius.circular(999),
+            ),
+            child: Text(
+              status,
+              style: TextStyle(
+                color: statusColor,
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _RoomCodeCard extends StatelessWidget {
+  const _RoomCodeCard({required this.roomId, required this.onCopy});
+
+  final String roomId;
+  final VoidCallback onCopy;
+
+  @override
+  Widget build(BuildContext context) => Semantics(
+        button: true,
+        label: 'Copy room code $roomId',
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            onTap: onCopy,
+            borderRadius: BorderRadius.circular(18),
+            child: Ink(
+              padding: const EdgeInsets.fromLTRB(20, 14, 14, 14),
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: .12),
+                border: Border.all(color: Colors.white.withValues(alpha: .24)),
+                borderRadius: BorderRadius.circular(18),
+              ),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      roomId,
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
                         color: Colors.white,
+                        fontSize: 32,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: 4,
                       ),
-                    )
-                  else if (playerName.isEmpty)
-                    _buildNameInput()
-                  else if (roomId.isEmpty)
-                    _buildRoomSelection()
-                  else if (!gameStarted)
-                    _buildWaitingRoom()
-                  else
-                    _buildGameScreen(),
+                    ),
+                  ),
+                  Container(
+                    width: 44,
+                    height: 44,
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: .16),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: const Icon(Icons.copy_outlined, color: Colors.white),
+                  ),
                 ],
               ),
             ),
           ),
         ),
-      ),
-    );
-  }
+      );
+}
 
-  Widget _buildNameInput() {
-    return Padding(
-      padding: EdgeInsets.all(16),
-      child: Column(
-        children: [
-          Text(
-            "Enter Your Name",
-            style: TextStyle(
-              fontSize: 24,
-              fontFamily: 'Poppins',
-              color: Colors.white,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-          SizedBox(height: 20),
-          TextField(
-            controller: nameController,
-            decoration: InputDecoration(
-              filled: true,
-              fillColor: Colors.white.withOpacity(0.2),
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-                borderSide: BorderSide.none,
-              ),
-              hintText: "Your Name",
-              hintStyle: TextStyle(color: Colors.white70),
-            ),
-            style: TextStyle(color: Colors.white),
-          ),
-          SizedBox(height: 20),
-          _buildButton(
-            "Continue",
-            () {
-              if (nameController.text.trim().isNotEmpty) {
-                setState(() {
-                  playerName = nameController.text.trim();
-                  _saveName(playerName);
-                });
-              }
-            },
-          ),
-        ],
-      ),
-    );
-  }
+class _MatchScore extends StatelessWidget {
+  const _MatchScore({required this.room, required this.playerIndex});
 
-  Widget _buildRoomSelection() {
-    return Padding(
-      padding: EdgeInsets.all(16),
-      child: Column(
-        children: [
-          Text(
-            "Welcome, $playerName!",
-            style: TextStyle(
-              fontSize: 24,
-              fontFamily: 'Poppins',
-              color: Colors.white,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-          SizedBox(height: 20),
-          TextField(
-            controller: roomController,
-            decoration: InputDecoration(
-              filled: true,
-              fillColor: Colors.white.withOpacity(0.2),
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-                borderSide: BorderSide.none,
-              ),
-              hintText: "Enter Room ID",
-              hintStyle: TextStyle(color: Colors.white70),
-            ),
-            style: TextStyle(color: Colors.white),
-          ),
-          SizedBox(height: 20),
-          _buildButton(
-            "Join Room",
-            () => _joinRoom(roomController.text),
-          ),
-          SizedBox(height: 10),
-          _buildButton(
-            "Create Room",
-            _createRoom,
-          ),
-        ],
-      ),
-    );
-  }
+  final OnlineRoom room;
+  final int playerIndex;
 
-  Widget _buildWaitingRoom() {
-    return Padding(
-      padding: EdgeInsets.all(16),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Text(
-            "Room ID: $roomId",
-            style: TextStyle(
-              fontSize: 24,
-              fontFamily: 'Poppins',
-              color: Colors.white,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-          SizedBox(height: 20),
-          if (!opponentJoined)
-            Text(
-              "Waiting for opponent...",
-              style: TextStyle(
-                fontSize: 18,
-                fontFamily: 'Poppins',
-                color: Colors.white,
-              ),
-            ),
-          if (notificationMessage.isNotEmpty)
-            Container(
-              margin: EdgeInsets.symmetric(vertical: 10),
-              padding: EdgeInsets.all(10),
-              decoration: BoxDecoration(
-                color: Colors.green.withOpacity(0.3),
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: Text(
-                notificationMessage,
-                style: TextStyle(
-                  fontSize: 16,
-                  fontFamily: 'Poppins',
-                  color: Colors.white,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-            ),
-          if (opponentJoined && opponentName != null)
-            Text(
-              "Opponent: $opponentName",
-              style: TextStyle(
-                fontSize: 18,
-                fontFamily: 'Poppins',
-                color: Colors.white,
-              ),
-            ),
-          SizedBox(height: 20),
-          _buildButton(
-            isPlayerReady ? "Not Ready" : "I'm Ready",
-            _toggleReadyStatus,
-          ),
-          SizedBox(height: 10),
-          _buildButton("Leave Room", _restartGame),
-          if (opponentJoined && isOpponentReady)
-            Container(
-              margin: EdgeInsets.only(top: 15),
-              padding: EdgeInsets.symmetric(horizontal: 15, vertical: 8),
-              decoration: BoxDecoration(
-                color: Colors.green.withOpacity(0.3),
-                borderRadius: BorderRadius.circular(20),
-              ),
-              child: Text(
-                "Opponent is ready!",
-                style: TextStyle(
-                  fontSize: 18,
-                  fontFamily: 'Poppins',
-                  color: Colors.white,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-            ),
-          if (isPlayerReady && isOpponentReady && opponentJoined)
-            Padding(
-              padding: EdgeInsets.only(top: 15),
-              child: Text(
-                "Game will start soon...",
-                style: TextStyle(
-                  fontSize: 18,
-                  fontFamily: 'Poppins',
-                  color: Colors.yellow,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-            ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildGameScreen() {
+  @override
+  Widget build(BuildContext context) {
+    final player = room.playerAt(playerIndex)!;
+    final opponent = room.playerAt(playerIndex == 0 ? 1 : 0);
+    final opponentName = opponent?.name ?? 'Opponent';
+    final opponentScore = opponent?.score ?? 0;
     return Column(
-      mainAxisSize: MainAxisSize.min,
       children: [
-        Text(
-          "Room ID: $roomId",
-          style: TextStyle(
-            fontSize: 20,
-            fontFamily: 'Poppins',
-            color: Colors.white,
-          ),
-        ),
-        SizedBox(height: 10),
-        Text(
-          isMyTurn ? "Your Turn" : "$opponentName's Turn",
-          style: TextStyle(
-            fontSize: 24,
-            fontFamily: 'Poppins',
-            color: Colors.white,
-            fontWeight: FontWeight.bold,
-          ),
-        ),
-        SizedBox(height: 20),
-        if (gameState != null)
-          Padding(
-            padding: EdgeInsets.all(16),
-            child: BingoBoard(
-              playerIndex: playerIndex,
-              gameState: gameState!,
-              onNumberSelected: (number) {
-                if (isMyTurn) {
-                  gameService.makeMove(roomId, playerIndex, number);
-                }
-              },
-              onRestart: _restartGame,
-              showOpponentColors: true,
-            ),
-          ),
-        ConfettiWidget(
-          confettiController: _confettiController,
-          blastDirectionality: BlastDirectionality.explosive,
-          shouldLoop: false,
-          colors: [Colors.green, Colors.yellow, Colors.pink, Colors.purple],
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            _MatchPerson(name: player.name, score: player.score, isYou: true),
+            const Text('VS',
+                style: TextStyle(
+                    color: Colors.white70, fontWeight: FontWeight.w700)),
+            _MatchPerson(name: opponentName, score: opponentScore),
+          ],
         ),
       ],
     );
   }
+}
 
-  Widget _buildButton(String text, VoidCallback onPressed) {
-    return ElevatedButton(
-      onPressed: onPressed,
-      style: ElevatedButton.styleFrom(
-        padding: EdgeInsets.symmetric(horizontal: 40, vertical: 16),
-        backgroundColor: Colors.white,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        elevation: 5,
-      ),
-      child: Text(
-        text,
-        style: TextStyle(
-          fontSize: 18,
-          fontFamily: 'Poppins',
-          color: Color.fromRGBO(123, 31, 162, 1),
-        ),
-      ),
-    );
-  }
+class _MatchPerson extends StatelessWidget {
+  const _MatchPerson({
+    required this.name,
+    required this.score,
+    this.isYou = false,
+  });
 
-  void _showWinDialog(String message, {required bool isPlayerWin}) {
-    if (isPlayerWin) _confettiController.play();
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) => Dialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        elevation: 10,
-        child: Container(
-          padding: EdgeInsets.all(20),
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              colors: [
-                Color.fromRGBO(156, 39, 176, 0.7),
-                Color.fromRGBO(123, 31, 162, 0.9),
-              ],
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-            ),
-            borderRadius: BorderRadius.circular(20),
-          ),
-          child: Column(
+  final String name;
+  final int score;
+  final bool isYou;
+
+  @override
+  Widget build(BuildContext context) => Column(
+        children: [
+          Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Text(
-                "Game Over",
-                style: TextStyle(
-                  fontSize: 28,
-                  fontFamily: 'Poppins',
-                  fontWeight: FontWeight.bold,
-                  color: Colors.white,
-                ),
-              ),
-              SizedBox(height: 10),
-              Text(
-                message,
-                style: TextStyle(
-                  fontSize: 20,
-                  fontFamily: 'Poppins',
-                  color: Colors.white,
-                ),
-              ),
-              SizedBox(height: 20),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                children: [
-                  ElevatedButton(
-                    onPressed: () {
-                      Navigator.pop(context);
-                      _resetGameInRoom();
-                    },
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.white,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                    ),
-                    child: Text(
-                      "New Game",
-                      style: TextStyle(
-                        fontFamily: 'Poppins',
-                        color: Color.fromRGBO(123, 31, 162, 1),
-                      ),
-                    ),
-                  ),
-                  ElevatedButton(
-                    onPressed: () {
-                      Navigator.pop(context);
-                      _restartGame();
-                    },
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.white,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                    ),
-                    child: Text(
-                      "Exit",
-                      style: TextStyle(
-                        fontFamily: 'Poppins',
-                        color: Color.fromRGBO(123, 31, 162, 1),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
+              Icon(isYou ? Icons.person_rounded : Icons.person_outline,
+                  color: Colors.white70, size: 16),
+              const SizedBox(width: 4),
+              Text(name,
+                  style: const TextStyle(color: Colors.white70, fontSize: 12)),
             ],
           ),
-        ),
-      ),
-    );
-  }
-
-  Future<void> _resetGameInRoom() async {
-    try {
-      final roomRef = _database.child('rooms').child(roomId);
-
-      final player1GameState = GameState.initial();
-      final player2GameState = GameState.initial();
-
-      await roomRef
-          .child('players')
-          .child('0')
-          .child('gameState')
-          .set(player1GameState.toJson());
-      await roomRef
-          .child('players')
-          .child('1')
-          .child('gameState')
-          .set(player2GameState.toJson());
-
-      await roomRef
-          .update({'status': 'playing', 'currentTurn': 0, 'lastMove': null});
-
-      setState(() {
-        gameState = playerIndex == 0 ? player1GameState : player2GameState;
-        isMyTurn = playerIndex == 0;
-        gameStarted = true;
-      });
-    } catch (e) {
-      _showErrorSnackBar('Error starting new game');
-    }
-  }
+          Text('$score',
+              style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 22,
+                  fontWeight: FontWeight.w700)),
+        ],
+      );
 }

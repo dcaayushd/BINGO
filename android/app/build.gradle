@@ -1,9 +1,6 @@
 plugins {
     id "com.android.application"
-    // START: FlutterFire Configuration
-    id 'com.google.gms.google-services'
-    // END: FlutterFire Configuration
-    id "kotlin-android"
+    id "org.jetbrains.kotlin.android"
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id "dev.flutter.flutter-gradle-plugin"
 }
@@ -14,17 +11,8 @@ android {
     ndkVersion = flutter.ndkVersion
 
     compileOptions {
-        // sourceCompatibility = JavaVersion.VERSION_21
-        // targetCompatibility = JavaVersion.VERSION_21
-        sourceCompatibility = JavaVersion.VERSION_22
-        targetCompatibility = JavaVersion.VERSION_22
-    }
-
-    kotlinOptions {
-        // jvmTarget = JavaVersion.VERSION_21
-        // jvmTarget = "17"
-        jvmTarget = "1.8"  // Use the latest compatible JVM version, typically 1.8 or 11
-        freeCompilerArgs = ["-Xopt-in=kotlin.RequiresOptIn"] 
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
     }
 
     defaultConfig {
@@ -44,6 +32,12 @@ android {
             // Signing with the debug keys for now, so `flutter run --release` works.
             signingConfig = signingConfigs.debug
         }
+    }
+}
+
+kotlin {
+    compilerOptions {
+        jvmTarget = org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17
     }
 }
 
